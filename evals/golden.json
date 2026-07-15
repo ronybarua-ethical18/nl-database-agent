@@ -1,0 +1,10 @@
+{
+  "_comment": "Milestone 5 — golden dataset. Target 30-40 questions. Each entry: a natural-language question plus reference SQL whose result set defines the correct answer.",
+  "questions": [
+    {
+      "id": "example-001",
+      "question": "How many customers do we have?",
+      "expected_sql": "SELECT count(*) AS customer_count FROM customers"
+    }
+  ]
+}

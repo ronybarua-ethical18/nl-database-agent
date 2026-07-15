@@ -1,0 +1,25 @@
+# Milestone 6 — CI gate.
+# Runs the eval suite on every PR and fails the build if accuracy drops
+# below EVAL_THRESHOLD. Enable the real steps once `npm run eval` exists.
+name: eval
+
+on:
+  pull_request:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # TODO(milestone 6): uncomment once the eval runner is implemented
+      # - run: npm run eval
+      #   env:
+      #     DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      #     GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      #     EVAL_THRESHOLD: "0.8"
+      - run: echo "eval suite not implemented yet (milestone 5)"
