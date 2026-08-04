@@ -2,7 +2,7 @@
 
 Ask a Postgres database questions in plain English — the agent writes the SQL, runs it, fixes its own mistakes, and answers with an explanation, a table, and a chart.
 
-> **Live demo:** _coming soon (Vercel)_ · **Eval accuracy:** _coming soon — see [Evals](#evals)_
+> **Live demo:** [nl-database-agent.vercel.app](https://nl-database-agent.vercel.app) · **Eval accuracy:** _coming soon — see [Evals](#evals)_
 
 <!-- TODO: GIF demo + eval scorecard screenshot here (milestone 7) -->
 
