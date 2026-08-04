@@ -261,6 +261,7 @@ Measured against the seeded data, this is **narrower than first assumed**: zero 
 | Referential/time integrity | **0** orders predating their customer's signup; no non-positive quantities or prices |
 | Data texture as designed | 5 statuses, 12 countries, 6 categories, 19.7% of lines discounted (target 20%) |
 | Landing page renders live data (checks 5, 7) | served at `localhost:3000` showing 400 / 80 / 3,000 / 5,716 / 629 |
+| **Deployed and live (check 6)** | `nl-database-agent.vercel.app` renders the same counts from Neon — production URL, not a preview |
 | Counts are dynamic, not baked | `next build` reports `/` as `ƒ (Dynamic)`; `force-dynamic` confirmed correct for this Next version (`cacheComponents` is not enabled) |
 | Build and lint (check 8) | `next build` and `eslint` both clean |
 | Reference files out of `public/` (§3 step 5) | moved to `docs/reference/`; `public/` holds only the Next.js SVGs |
@@ -269,12 +270,14 @@ Measured against the seeded data, this is **narrower than first assumed**: zero 
 
 `order_items` came in at 5,716 rather than the estimated ~7,500: duplicate-product lines within an order are skipped rather than resampled, and the Zipf popularity curve makes collisions common. This is expected behaviour, not a defect.
 
-### Blocked on you
+**Milestone 0's "done when" is met:** the `vercel.app` link opens and Neon holds a seeded database.
 
-1. **`GOOGLE_GENERATIVE_AI_API_KEY` is empty** in `.env.local` — the agent cannot run at all. Free key: `aistudio.google.com/apikey`. This blocks §3 step 7 and everything in milestone 1.
-2. **`DATABASE_URL_OWNER` is still the `.env.example` placeholder** (`owner@host/dbname`). The seed above ran via a one-off shell override; `npm run seed` will fail with `EAI_AGAIN host` until this holds the real `neondb_owner` string.
-3. **The read-only role does not exist** (§3 step 2). Only `neondb_owner` and Neon's built-in roles are present, and `DATABASE_URL` currently uses `neondb_owner`. Acceptance check 2 cannot pass yet.
-4. **Not deployed** (§3 step 6). No Vercel project, so the "done when" is unmet and the README's live-demo line still says *coming soon*.
+### Still outstanding
+
+1. **The read-only role does not exist** (§3 step 2) — now the most urgent item, because the deploy is public. Only `neondb_owner` and Neon's built-in roles exist, and `DATABASE_URL` (local and on Vercel) uses `neondb_owner` on the unpooled host. Acceptance check 2 cannot pass. **Do this before adding the LLM key to Vercel**: an empty key is currently the only reason a public `/api/ask` cannot turn stranger-supplied text into SQL against a write-capable connection.
+2. **`GOOGLE_GENERATIVE_AI_API_KEY` is empty** in `.env.local` — the agent has still never completed a run, and `gemini-3.5-flash` is unverified. Blocks §3 step 7 and all of milestone 1.
+3. **`DATABASE_URL_OWNER` is still the `.env.example` placeholder** (`owner@host/dbname`). The seed ran via a one-off shell override; `npm run seed` fails with `EAI_AGAIN host` until this holds the real `neondb_owner` string.
+4. **Rotate the `neondb_owner` password.** It has been pasted outside the gitignored file during setup, and it is the owner credential. Reset it in the Neon console, then update `DATABASE_URL_OWNER` locally — `DATABASE_URL` should end up on `app_readonly` anyway per item 1.
 
 ## 7. Out of scope
 
