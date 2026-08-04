@@ -1,10 +1,15 @@
 /**
- * The demo e-commerce schema, as shown to the LLM.
- * Keep this in sync with scripts/seed.ts.
+ * The demo e-commerce schema.
+ *
+ * SCHEMA_DDL is the single source of truth: `scripts/seed.ts` executes it to
+ * create the real tables, and SCHEMA_DESCRIPTION (built from it below) is the
+ * text shown to the LLM. Keeping one copy means the prompt cannot drift from
+ * the database — a drift that would surface as quietly degraded accuracy
+ * rather than as an error.
  */
-export const SCHEMA_DESCRIPTION = `
-Postgres database: demo e-commerce shop.
 
+/** Executable Postgres. The `--` column notes are real SQL comments. */
+export const SCHEMA_DDL = `
 CREATE TABLE customers (
   id         serial PRIMARY KEY,
   name       text NOT NULL,
@@ -34,8 +39,21 @@ CREATE TABLE order_items (
   quantity   integer NOT NULL,
   unit_price numeric(10,2) NOT NULL    -- price actually paid per unit
 );
+`.trim();
+
+/** Tables in dependency order — children last. Used for DROP/TRUNCATE ordering. */
+export const TABLES = ["customers", "products", "orders", "order_items"] as const;
+
+export const SCHEMA_DESCRIPTION = `
+Postgres database: demo e-commerce shop.
+
+${SCHEMA_DDL}
 
 Notes:
 - Revenue for an order item = quantity * unit_price.
+- unit_price is the price actually paid and may differ from products.price
+  (discounts), so revenue must be computed from order_items.unit_price.
+- Cancelled orders (status = 'cancelled') are still rows in orders; exclude
+  them when the question is about actual sales or revenue.
 - Prefer human-readable columns (names over ids) in results.
 `.trim();
