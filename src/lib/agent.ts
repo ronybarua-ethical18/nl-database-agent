@@ -43,6 +43,14 @@ Rules:
 - Exactly one statement. SELECT (or WITH ... SELECT) only.
 - Never write INSERT/UPDATE/DELETE/DDL. If the question asks to modify data or
   do anything other than read data, output exactly: REFUSE: <one short sentence why>
+- If the schema genuinely cannot answer the question — the data needed is not in
+  these tables — output exactly:
+  CANNOT_ANSWER: <one short sentence naming what is missing>
+  Never invent a column, and never substitute NULL, a constant, or a placeholder
+  to make a query run. A table of NULLs looks like an answer and is worse than
+  saying the data is not there.
+  Only do this when the data is truly absent. If the question is vague but a
+  reasonable interpretation exists in the schema, answer that interpretation.
 - Add LIMIT 100 unless the query aggregates to few rows or the user asks for more.
 - Prefer human-readable columns (names, not ids) and clear column aliases.`;
 
@@ -158,6 +166,21 @@ export async function askDatabase(question: string): Promise<AgentResult> {
         message:
           "I can only read data, not change it. " +
           generated.replace(/^refuse:\s*/i, ""),
+      };
+    }
+
+    // The schema cannot answer this. Return immediately — retrying will not
+    // conjure a column that does not exist, and the alternative is the model
+    // fabricating something like AVG(NULL::interval), which renders as a table
+    // of nulls and reads as a real answer.
+    if (/^cannot_answer:/i.test(generated)) {
+      return {
+        ok: false,
+        question,
+        attempts,
+        message:
+          "This database doesn't hold what that question needs. " +
+          generated.replace(/^cannot_answer:\s*/i, ""),
       };
     }
 
