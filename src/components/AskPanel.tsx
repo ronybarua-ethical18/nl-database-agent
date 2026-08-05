@@ -1,14 +1,16 @@
 "use client";
 
 // Milestone 1 — the happy path: type a question, POST it to /api/ask, render
-// the rows as a plain table. Explanation, chart, and the "Show SQL" toggle are
-// deliberately left for milestone 4; the retry trace is milestone 3, as is
-// reporting an unresolvable question. Only transport failures are handled here.
+// the rows as a plain table.
+// Milestone 3 — surface the retry trace and the honest failure message.
+// Explanation, chart, and the "Show SQL" toggle remain deliberately absent;
+// those are milestone 4.
 
 import { useState, type SubmitEvent } from "react";
 // Type-only import, erased at build time — this does not pull the server-side
 // database or LLM modules into the client bundle.
 import type { AgentResult } from "@/lib/agent";
+import AgentTrace from "./AgentTrace";
 import ResultTable from "./ResultTable";
 
 type Status = "idle" | "loading" | "done" | "error";
@@ -83,13 +85,21 @@ export default function AskPanel() {
           </div>
         )}
 
+        {/* Milestone 3 — the retry trace, shown only when an attempt failed. */}
+        {status === "done" && result && result.attempts.length > 0 && (
+          <AgentTrace attempts={result.attempts} />
+        )}
+
         {/*
-          A returned result with ok:false — the agent refusing a write request,
-          or reporting that it could not resolve the question — renders nothing
-          here on purpose. Surfacing that message is milestone 2 (refuse
-          gracefully) and milestone 3 (answer honestly on failure). Only
-          transport failures are handled above, so the page stays debuggable.
+          Milestone 3 — when every attempt fails, or the agent refuses a write
+          request, say so plainly instead of rendering nothing.
         */}
+        {status === "done" && result && !result.ok && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {result.message}
+          </div>
+        )}
+
         {status === "done" && result?.ok && (
           <ResultTable
             columns={result.columns ?? []}
