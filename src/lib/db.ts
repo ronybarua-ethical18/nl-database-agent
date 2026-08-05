@@ -15,9 +15,6 @@ export function getSql(): postgres.Sql {
       max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
-      connection: {
-        statement_timeout: STATEMENT_TIMEOUT_MS,
-      },
     });
   }
   return client;
@@ -31,12 +28,22 @@ export type QueryResult = {
 
 /**
  * Run a (pre-validated) query inside a READ ONLY transaction, capped at
- * MAX_ROWS rows. Postgres itself rejects any write here even if one slipped
- * past the static guard.
+ * MAX_ROWS rows and bounded by a statement timeout. Postgres itself rejects
+ * any write here even if one slipped past the static guard.
+ *
+ * The timeout is applied with SET LOCAL rather than as a connection parameter:
+ * Neon's proxy silently drops `statement_timeout` from the startup packet
+ * (measured — `show statement_timeout` returned 0 and a `pg_sleep(20)` ran to
+ * completion). SET LOCAL is also the right choice for the pooled endpoint,
+ * since it is released at COMMIT and so cannot leak to another session's
+ * query on a shared connection. `npm run check:safety` verifies it still
+ * fires.
  */
 export async function runReadOnlyQuery(query: string): Promise<QueryResult> {
   const sql = getSql();
   const result = await sql.begin("read only", async (tx) => {
+    // Interpolated from a module constant, never from user input.
+    await tx.unsafe(`set local statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
     return await tx.unsafe(query);
   });
 
