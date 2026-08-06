@@ -14,3 +14,12 @@ export function getModel(): LanguageModel {
   }
   return google(process.env.LLM_MODEL ?? "gemini-3.5-flash");
 }
+
+/** The provider and model actually in use, for the Settings panel. */
+export function describeModel(): { provider: string; model: string } {
+  const provider = process.env.LLM_PROVIDER ?? "google";
+  const model =
+    process.env.LLM_MODEL ??
+    (provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash");
+  return { provider, model };
+}

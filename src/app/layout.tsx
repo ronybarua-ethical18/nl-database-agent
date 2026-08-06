@@ -1,22 +1,30 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Loaded through next/font rather than a CSS @import: self-hosted, preloaded,
+// and no render-blocking request to a third-party origin.
+const inter = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "Natural-language SQL Agent",
-  // Claims only what is built. The explanation and chart land in milestone 4.
   description:
-    "Ask a Postgres database questions in plain English. The agent reads the schema, writes the SQL, runs it read-only, and fixes its own mistakes.",
+    "Ask a Postgres database questions in plain English. The agent reads the schema, writes the SQL, runs it read-only, fixes its own mistakes, and answers with an explanation, a table, and a chart.",
 };
 
 export default function RootLayout({
@@ -27,7 +35,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

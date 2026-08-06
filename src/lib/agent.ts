@@ -5,7 +5,7 @@ import { getModel } from "./llm";
 import { SCHEMA_DESCRIPTION } from "./schema";
 import { validateSql } from "./sql-guard";
 
-const MAX_ATTEMPTS = 3;
+export const MAX_ATTEMPTS = 3;
 
 export type Attempt = {
   sql: string;
@@ -27,6 +27,8 @@ export type AgentResult = {
   rows?: Record<string, unknown>[];
   truncated?: boolean;
   explanation?: string;
+  /** Why the explanation/chart are missing, when the second LLM call failed. */
+  explanationNote?: string;
   chart?: ChartSpec;
   /** Every SQL attempt, including failed ones — shown in the UI */
   attempts: Attempt[];
@@ -124,7 +126,7 @@ async function explainResult(
   question: string,
   sql: string,
   result: QueryResult,
-): Promise<{ explanation: string; chart: ChartSpec }> {
+): Promise<{ explanation?: string; chart: ChartSpec; note?: string }> {
   const sample = result.rows.slice(0, 25);
   try {
     const { output } = await generateText({
@@ -152,10 +154,16 @@ Write the explanation and pick a chart.`,
       explanation: output.explanation,
       chart: valid ? chart : { type: "none" },
     };
-  } catch {
+  } catch (err) {
+    // The rows are already in hand, so a failure here degrades the answer
+    // rather than breaking it. Say so instead of substituting filler: the old
+    // fallback ("The query returned 5 row(s).") read like a real explanation
+    // and hid the fact that the chart had silently disappeared too.
     return {
-      explanation: `The query returned ${result.rows.length} row(s).`,
       chart: { type: "none" },
+      note: isRateLimited(err)
+        ? "The plain-language summary and chart were skipped — the model is rate limited. The table below is the full result."
+        : "The plain-language summary and chart were unavailable for this answer. The table below is the full result.",
     };
   }
 }
@@ -242,7 +250,11 @@ export async function askDatabase(question: string): Promise<AgentResult> {
     }
 
     attempts.push({ sql: guard.sql });
-    const { explanation, chart } = await explainResult(question, guard.sql, result);
+    const { explanation, chart, note } = await explainResult(
+      question,
+      guard.sql,
+      result,
+    );
     return {
       ok: true,
       question,
@@ -251,6 +263,7 @@ export async function askDatabase(question: string): Promise<AgentResult> {
       rows: result.rows,
       truncated: result.truncated,
       explanation,
+      explanationNote: note,
       chart,
       attempts,
     };
