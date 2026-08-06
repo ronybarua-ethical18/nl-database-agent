@@ -1,6 +1,6 @@
 import postgres from "postgres";
 
-const STATEMENT_TIMEOUT_MS = 8_000;
+export const STATEMENT_TIMEOUT_MS = 8_000;
 export const MAX_ROWS = 500;
 
 let client: postgres.Sql | undefined;
