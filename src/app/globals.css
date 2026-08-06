@@ -6,6 +6,10 @@
 html,
 body {
   background: #0c0e0d;
+  /* App shell: the page never scrolls. Scrolling belongs to the results pane
+     inside the dashboard, so the sidebar and header stay put. */
+  height: 100%;
+  overflow: hidden;
 }
 
 @media (prefers-color-scheme: light) {

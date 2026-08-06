@@ -81,8 +81,3 @@ export const THEMES: { dark: Theme; light: Theme } = {
 
 /** The agent-trace terminal panel, which stays dark in both themes. */
 export const TERM = { bg: "#0A0C0B", ink: "#C9CFC9", dim: "#7C837D" };
-
-export const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;

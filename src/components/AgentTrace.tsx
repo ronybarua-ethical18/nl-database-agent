@@ -35,11 +35,15 @@ export function buildSteps(attempts: Attempt[], ok: boolean): Step[] {
     }
   });
 
-  steps.push(
-    ok
-      ? { tone: "ok", text: "Answer ready" }
-      : { tone: "err", text: "Could not resolve the question" },
-  );
+  if (ok) {
+    steps.push({ tone: "ok", text: "Answer ready" });
+  } else if (attempts.length === 0) {
+    // Refused, or the schema cannot answer it: no SQL was ever run, so saying
+    // it could not be resolved would misdescribe what happened.
+    steps.push({ tone: "err", text: "Stopped without running a query" });
+  } else {
+    steps.push({ tone: "err", text: "Could not resolve the question" });
+  }
   return steps;
 }
 

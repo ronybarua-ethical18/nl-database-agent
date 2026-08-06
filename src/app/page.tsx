@@ -66,17 +66,5 @@ export default async function Home() {
     canWrite,
   };
 
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <Dashboard config={config} datasetSummary={summary} />
-    </div>
-  );
+  return <Dashboard config={config} datasetSummary={summary} />;
 }

@@ -123,26 +123,30 @@ export default function Dashboard({
         ["--navhover" as string]: theme.navHover,
         color: theme.ink,
         background: theme.bg,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 16,
-        boxShadow: theme.shadow,
         display: "flex",
         overflow: "hidden",
-        width: "100%",
-        maxWidth: 1100,
-        height: "min(760px, calc(100vh - 48px))",
+        // Pinned to the viewport rather than sized by the flex chain. Taking the
+        // shell out of page flow is what guarantees the sidebar cannot scroll:
+        // there is no page scroll to carry it, whatever an ancestor does.
+        position: "fixed",
+        inset: 0,
       }}
     >
       {/* Sidebar */}
       <aside
         style={{
-          width: 216,
+          // 216 in the reference, which was sized for an 1100px card. Widened
+          // now that the shell fills the viewport.
+          width: 260,
           flexShrink: 0,
           background: theme.panel,
           borderRight: `1px solid ${theme.border}`,
           display: "flex",
           flexDirection: "column",
-          padding: "18px 14px",
+          padding: "20px 16px",
+          // The sidebar is fixed: it never scrolls, and never grows the shell.
+          minHeight: 0,
+          overflow: "hidden",
         }}
       >
         <div
@@ -199,11 +203,11 @@ export default function Dashboard({
                   display: "flex",
                   alignItems: "center",
                   gap: 11,
-                  padding: "9px 10px",
+                  padding: "10px 12px",
                   borderRadius: 9,
                   border: "none",
                   cursor: "pointer",
-                  fontSize: 13.5,
+                  fontSize: 14,
                   font: "inherit",
                   textAlign: "left",
                   background: on ? theme.navActive : "transparent",
@@ -246,11 +250,11 @@ export default function Dashboard({
               display: "flex",
               alignItems: "center",
               gap: 11,
-              padding: "9px 10px",
+              padding: "10px 12px",
               borderRadius: 9,
               border: "none",
               cursor: "pointer",
-              fontSize: 13.5,
+              fontSize: 14,
               width: "100%",
               textAlign: "left",
               background: "transparent",
@@ -273,6 +277,10 @@ export default function Dashboard({
           display: "flex",
           flexDirection: "column",
           minWidth: 0,
+          // Required for the scrolling child below: a flex item defaults to
+          // min-height:auto, so without this a tall result grows this column
+          // past the viewport and the page scrolls, taking the sidebar with it.
+          minHeight: 0,
         }}
       >
         <header
