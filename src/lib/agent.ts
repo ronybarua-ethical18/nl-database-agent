@@ -52,7 +52,13 @@ Rules:
   Only do this when the data is truly absent. If the question is vague but a
   reasonable interpretation exists in the schema, answer that interpretation.
 - Add LIMIT 100 unless the query aggregates to few rows or the user asks for more.
-- Prefer human-readable columns (names, not ids) and clear column aliases.`;
+- Prefer human-readable columns (names, not ids) and clear column aliases.
+- When ranking with LIMIT, add a stable secondary sort key (usually the name)
+  after the ranking column, so ties resolve identically on every run. Without
+  one, Postgres may return a different row for "top 5" each time the same
+  question is asked.
+- Select only the columns the question asks about. Do not add identifying extras
+  like email addresses unless they were requested.`;
 
 function stripFences(text: string): string {
   return text
@@ -90,6 +96,12 @@ async function generateSqlOnce(
 
 const EMPTY_RESULT_ERROR =
   "The query ran but returned zero rows. Double-check joins, filters, and string values.";
+
+/** Provider quota / rate-limit failures, which are transient rather than bugs. */
+function isRateLimited(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /quota|rate limit|rate-limit|too many requests|\b429\b/i.test(message);
+}
 
 const answerSchema = z.object({
   explanation: z
@@ -156,7 +168,25 @@ export async function askDatabase(question: string): Promise<AgentResult> {
   const attempts: Attempt[] = [];
 
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const generated = await generateSqlOnce(question, attempts);
+    let generated: string;
+    try {
+      generated = await generateSqlOnce(question, attempts);
+    } catch (err) {
+      // A quota error is transient and worth explaining. The Gemini free tier
+      // allows ~20 requests/minute and each question costs up to 4, so a public
+      // demo trips this easily — "Something went wrong" would be misleading.
+      if (isRateLimited(err)) {
+        return {
+          ok: false,
+          question,
+          attempts,
+          message:
+            "The language model is rate limited right now — the free tier allows " +
+            "only a few requests a minute. Wait about a minute and ask again.",
+        };
+      }
+      throw err;
+    }
 
     if (/^refuse:/i.test(generated)) {
       return {

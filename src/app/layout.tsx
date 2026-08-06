@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Natural-language SQL Agent",
+  // Claims only what is built. The explanation and chart land in milestone 4.
   description:
-    "Ask a Postgres database questions in plain English. The agent writes the SQL, runs it, fixes its own mistakes, and answers with an explanation, a table, and a chart.",
+    "Ask a Postgres database questions in plain English. The agent reads the schema, writes the SQL, runs it read-only, and fixes its own mistakes.",
 };
 
 export default function RootLayout({
