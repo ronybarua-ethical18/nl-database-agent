@@ -34,6 +34,28 @@ export type AgentResult = {
   attempts: Attempt[];
   /** Present when !ok */
   message?: string;
+  /**
+   * Why the agent declined, when it declined deliberately rather than failed.
+   * The eval runner grades against this instead of matching on `message`, so
+   * rewording a user-facing string cannot silently break the suite.
+   */
+  refusal?: "refuse" | "cannot_answer";
+  /**
+   * The provider refused on quota, so this result measures nothing about the
+   * agent. The eval runner retries these and excludes any that never resolve,
+   * rather than scoring them as wrong answers.
+   */
+  rateLimited?: boolean;
+};
+
+export type AskOptions = {
+  /**
+   * Generate the plain-language explanation and chart spec. Costs one extra
+   * LLM call. The eval runner turns it off: grading compares result sets, so
+   * the explanation is never read, and skipping it cuts the calls a full run
+   * makes by roughly a third — which matters against a free-tier quota.
+   */
+  explain?: boolean;
 };
 
 const SQL_SYSTEM_PROMPT = `You translate natural-language questions into a single Postgres SELECT query.
@@ -172,7 +194,11 @@ Write the explanation and pick a chart.`,
  * The core loop: generate SQL → validate → execute → on failure, feed the
  * error back to the model and retry (up to MAX_ATTEMPTS).
  */
-export async function askDatabase(question: string): Promise<AgentResult> {
+export async function askDatabase(
+  question: string,
+  options: AskOptions = {},
+): Promise<AgentResult> {
+  const { explain = true } = options;
   const attempts: Attempt[] = [];
 
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
@@ -188,6 +214,7 @@ export async function askDatabase(question: string): Promise<AgentResult> {
           ok: false,
           question,
           attempts,
+          rateLimited: true,
           message:
             "The language model is rate limited right now — the free tier allows " +
             "only a few requests a minute. Wait about a minute and ask again.",
@@ -201,6 +228,7 @@ export async function askDatabase(question: string): Promise<AgentResult> {
         ok: false,
         question,
         attempts,
+        refusal: "refuse",
         message:
           "I can only read data, not change it. " +
           generated.replace(/^refuse:\s*/i, ""),
@@ -216,6 +244,7 @@ export async function askDatabase(question: string): Promise<AgentResult> {
         ok: false,
         question,
         attempts,
+        refusal: "cannot_answer",
         message:
           "This database doesn't hold what that question needs. " +
           generated.replace(/^cannot_answer:\s*/i, ""),
@@ -250,11 +279,9 @@ export async function askDatabase(question: string): Promise<AgentResult> {
     }
 
     attempts.push({ sql: guard.sql });
-    const { explanation, chart, note } = await explainResult(
-      question,
-      guard.sql,
-      result,
-    );
+    const { explanation, chart, note } = explain
+      ? await explainResult(question, guard.sql, result)
+      : { explanation: undefined, chart: { type: "none" } as ChartSpec, note: undefined };
     return {
       ok: true,
       question,
