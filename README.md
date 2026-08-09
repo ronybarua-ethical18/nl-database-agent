@@ -65,11 +65,12 @@ src/
 scripts/
   seed.ts                  # seeds the demo shop data (faker, deterministic seed)
   check-safety.ts          # asserts the read-only role really is read-only
-  eval.ts                  # eval runner → accuracy scorecard (milestone 5)
+  eval.ts                  # eval runner → accuracy scorecard
+  verify-golden.ts         # executes the answer key so it can be audited
 evals/
-  golden.json              # golden dataset: question + reference SQL
+  golden.json              # golden dataset: 43 questions + reference SQL
 .github/workflows/
-  eval.yml                 # CI gate: eval suite on every PR (milestone 6)
+  eval.yml                 # CI gate: the 9-question subset on every PR
 ```
 
 ## Getting started
@@ -86,6 +87,8 @@ npm test               # SQL guard unit tests (Node test runner, no deps)
 npm run lint           # eslint
 npm run check:safety   # live privilege audit against the configured database
 npm run seed           # re-seed the demo data
+npm run eval           # grade the agent against the golden dataset
+npm run verify:golden  # execute the answer key and print what it returns
 ```
 
 `DATABASE_URL_OWNER` is used **only** by `npm run seed` and must never be set in the deployment environment — the deployed app should hold no credential capable of writing, so that the SQL guard is not the only thing standing between a prompt injection and your data.
@@ -100,13 +103,36 @@ Three layers, each of which would have to fail independently:
 
 ## Evals
 
-**Not built yet — milestone 5.** `evals/golden.json` currently holds a single example question and `npm run eval` is a stub.
+`npm run eval` sends every question in `evals/golden.json` through the agent and grades it **by result set, not by SQL text**. The agent's query and the reference query both run against the seeded database, and their rows are compared as value tuples — column names are ignored, so aliasing `revenue` as `total_sales` is not a failure. Two very different queries are often both correct, and Postgres decides which is right for free, without an LLM judge and so without a judge's blind spots.
 
-The plan: `npm run eval` sends every question in the golden dataset through the agent and grades it **by result set, not by SQL text** — the agent's query and the reference query both run against the seeded database, and their result sets are compared order-insensitively. The runner prints a scorecard (e.g. `37/40 = 92.5%`); CI fails any PR that drops accuracy below the threshold.
+The dataset is 43 questions: aggregates, filters, joins, multi-table rankings, time series, and 5 questions the agent should decline (2 write requests it must refuse, 3 the schema genuinely cannot answer).
+
+```bash
+npm run eval                              # all 43
+npm run eval -- --tag regression,refusal  # the 9 the CI gate runs
+npm run eval -- --only top- --verbose     # iterate on a few, show the SQL
+npm run verify:golden                     # execute the answer key, print what it returns
+```
+
+`npm run verify:golden` exists because a wrong reference query silently becomes the definition of "correct", and every score built on it would be meaningless. It executes all 38 reference queries and prints their rows so the key can be audited rather than trusted.
+
+**Accuracy is not yet published.** The full suite costs 45–130 model calls and Gemini's free tier runs dry after roughly 20 questions a day, so no complete run has been recorded. The runner reports questions it could not measure as SKIPPED and excludes them from the denominator rather than scoring them as wrong — a partial run must not be mistaken for a good one.
+
+## CI gate
+
+`.github/workflows/eval.yml` runs on every pull request: SQL guard tests, then `verify:golden`, then the eval gate. Cheapest first — there is no point spending quota on the agent if the guard is already broken.
+
+The gate runs **9 questions, not 43**. That is a deliberate consequence of the free tier: a full-suite gate would go red on quota rather than on quality, and a red build that everyone learns to ignore is worse than no gate. The 9 are the `regression` and `refusal` questions — the ones guarding the rules in `SQL_SYSTEM_PROMPT`, which is where a prompt edit does its damage. Run the full suite manually before a release.
+
+It runs against **Groq** rather than Gemini, so the gate does not compete with the live demo for quota. A rule broken by a prompt edit breaks on either model, so a different provider still catches what the gate is for.
+
+Requires two repository secrets: `DATABASE_URL` (the `app_readonly` string — CI has no reason to hold a credential that can write) and `GROQ_API_KEY`.
 
 ## Design decisions (ADR)
 
 - **Result-based evals over an LLM judge** — two different SQL strings are often both correct; comparing executed result sets is deterministic, free, and doesn't inherit a judge model's blind spots.
+- **An unmeasured question is not a failed one** — the runner marks questions it could not run (provider quota) as SKIPPED and drops them from the denominator. Scoring them as wrong would let an infrastructure outage masquerade as a quality regression, which is the fastest way to make an eval score untrustworthy.
+- **A subset in CI, the full suite by hand** — gating on all 43 questions would exceed a free-tier day, so the gate would fail for reasons unrelated to the diff. The 9 questions that guard prompt rules catch the regression that matters at a tenth of the cost. The CI number is a regression signal, not the accuracy figure.
 - **Read-only at three layers** — any single layer can fail (novel SQL, a guard bypass, a misconfigured grant); all three failing at once is unlikely. The role is the load-bearing one, because it holds even if the application code is wrong.
 - **A retry limit (3), not loop-until-success** — most fixable errors resolve in one correction; unbounded retries burn tokens on questions the schema simply can't answer. Past the limit, the honest answer is "I couldn't."
 - **Refuse rather than fabricate** — asked for something the schema doesn't hold, an unconstrained model will invent a plausible query like `AVG(NULL::interval)`, which renders as a table of nulls and reads as a real answer. An explicit `CANNOT_ANSWER` path is cheaper and more honest than a wrong answer that looks right.
@@ -121,6 +147,6 @@ The plan: `npm run eval` sends every question in the golden dataset through the 
 - [x] 2 — Safety guardrails
 - [x] 3 — Self-correction loop
 - [x] 4 — Answer polish (explanation + chart + Show SQL + examples)
-- [ ] 5 — Eval suite
-- [ ] 6 — CI gate
+- [x] 5 — Eval suite
+- [x] 6 — CI gate _(written; the done-when — breaking a prompt turns CI red — is unproven until the repository secrets exist)_
 - [ ] 7 — Portfolio polish
