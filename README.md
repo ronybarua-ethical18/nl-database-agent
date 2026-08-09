@@ -124,15 +124,16 @@ npm run verify:golden                     # execute the answer key, print what i
 
 The gate runs **9 questions, not 43**. That is a deliberate consequence of the free tier: a full-suite gate would go red on quota rather than on quality, and a red build that everyone learns to ignore is worse than no gate. The 9 are the `regression` and `refusal` questions — the ones guarding the rules in `SQL_SYSTEM_PROMPT`, which is where a prompt edit does its damage. Run the full suite manually before a release.
 
-It runs against **Groq** rather than Gemini, so the gate does not compete with the live demo for quota. A rule broken by a prompt edit breaks on either model, so a different provider still catches what the gate is for.
+Requires two repository secrets: `DATABASE_URL` (the `app_readonly` string — CI has no reason to hold a credential that can write) and `GOOGLE_GENERATIVE_AI_API_KEY`.
 
-Requires two repository secrets: `DATABASE_URL` (the `app_readonly` string — CI has no reason to hold a credential that can write) and `GROQ_API_KEY`.
+The gate deliberately runs the **same provider as the app**. It was built against Groq first, to spare Gemini's quota, on the theory that a rule broken by a prompt edit would break on any model. That was measured and proved false: the same 5 refusal questions score 5/5 on Gemini and 2/5 on Groq, because Llama 3.3 ignores the `CANNOT_ANSWER` and column-restraint rules even when they are present and unmodified. A model capability difference is not a regression, and it left the gate with a permanent floor of 4 failures — a red build that means nothing. At ~12 calls a run the gate costs far less than the full suite, and `EVAL_ALLOW_SKIPPED` covers the outage case.
 
 ## Design decisions (ADR)
 
 - **Result-based evals over an LLM judge** — two different SQL strings are often both correct; comparing executed result sets is deterministic, free, and doesn't inherit a judge model's blind spots.
 - **An unmeasured question is not a failed one** — the runner marks questions it could not run (provider quota) as SKIPPED and drops them from the denominator. Scoring them as wrong would let an infrastructure outage masquerade as a quality regression, which is the fastest way to make an eval score untrustworthy.
 - **A subset in CI, the full suite by hand** — gating on all 43 questions would exceed a free-tier day, so the gate would fail for reasons unrelated to the diff. The 9 questions that guard prompt rules catch the regression that matters at a tenth of the cost. The CI number is a regression signal, not the accuracy figure.
+- **The gate runs the same model as the app** — swapping CI to a cheaper provider looked free, since a broken rule "should" break on any model. It isn't: Llama 3.3 ignores `CANNOT_ANSWER` and the column-restraint rule outright, scoring 2/5 on refusals where Gemini scores 5/5. An eval score is only meaningful against another score from the same provider.
 - **Read-only at three layers** — any single layer can fail (novel SQL, a guard bypass, a misconfigured grant); all three failing at once is unlikely. The role is the load-bearing one, because it holds even if the application code is wrong.
 - **A retry limit (3), not loop-until-success** — most fixable errors resolve in one correction; unbounded retries burn tokens on questions the schema simply can't answer. Past the limit, the honest answer is "I couldn't."
 - **Refuse rather than fabricate** — asked for something the schema doesn't hold, an unconstrained model will invent a plausible query like `AVG(NULL::interval)`, which renders as a table of nulls and reads as a real answer. An explicit `CANNOT_ANSWER` path is cheaper and more honest than a wrong answer that looks right.

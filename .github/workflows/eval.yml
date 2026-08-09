@@ -14,9 +14,10 @@
 # before a release.
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
-#   DATABASE_URL   the app_readonly pooled connection string, never the owner
-#                  one — CI has no reason to hold a credential that can write
-#   GROQ_API_KEY   https://console.groq.com/keys
+#   DATABASE_URL                  the app_readonly pooled connection string,
+#                                 never the owner one — CI has no reason to
+#                                 hold a credential that can write
+#   GOOGLE_GENERATIVE_AI_API_KEY  https://aistudio.google.com/apikey
 name: eval
 
 on:
@@ -61,19 +62,27 @@ jobs:
         run: npm run eval -- --tag regression,refusal
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Groq, not Gemini. Gemini's free tier is spent on the live demo and
-          # runs dry after roughly 20 questions a day, so a gate sharing it
-          # would go red on quota rather than on quality. What the gate checks
-          # is whether an edit to SQL_SYSTEM_PROMPT broke a rule, and a broken
-          # rule breaks on either model — so a different provider still catches
-          # the regression it exists to catch.
-          LLM_PROVIDER: groq
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # The same provider the app runs on, deliberately.
+          #
+          # This gate ran against Groq first, on the theory that a rule broken
+          # by a prompt edit would break on any model, so CI could use a
+          # cheaper provider. Measured, that was wrong. Llama 3.3 ignores the
+          # CANNOT_ANSWER and column-restraint rules even when they are present
+          # and unmodified: the same 5 refusal questions score 5/5 on Gemini
+          # and 2/5 on Groq. That is a model capability difference, not a
+          # regression, and it left the gate with a permanent floor of 4
+          # failures — a red build that means nothing, which is the one
+          # outcome a gate must never have.
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
           # 9 questions, so 0.85 permits one failure and no more. The model is
           # nondeterministic and an occasional single miss is not a regression;
           # two at once is.
           EVAL_THRESHOLD: "0.85"
-          EVAL_DELAY_MS: "2000"
-          # A quota outage warns rather than fails. A gate that goes red for
-          # reasons unrelated to the diff is a gate people learn to ignore.
+          # Pace the calls: the free tier allows roughly 20 a minute and one
+          # question can cost three.
+          EVAL_DELAY_MS: "4000"
+          # A quota outage warns rather than fails. The gate is ~12 calls, far
+          # under a day's budget, but sharing that budget with the live demo
+          # means an outage is possible and must not be mistaken for a
+          # regression.
           EVAL_ALLOW_SKIPPED: "1"
