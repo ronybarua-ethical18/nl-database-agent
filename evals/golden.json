@@ -1,10 +1,278 @@
 {
-  "_comment": "Milestone 5 — golden dataset. Target 30-40 questions. Each entry: a natural-language question plus reference SQL whose result set defines the correct answer.",
+  "_comment": "Milestone 5 golden dataset. Each entry is a question plus the ground truth for it. Answerable questions carry `expected_sql`, whose RESULT SET (not its text) defines the correct answer — the agent may phrase its query however it likes. Questions the agent should decline carry `expect`: refuse (asked to modify data) or cannot_answer (the schema does not hold it). Reference SQL must stay relative to now() — the seed builds months backwards from the current date, so a hard-coded date would rot. Verify with: npm run verify:golden",
   "questions": [
     {
-      "id": "example-001",
+      "id": "count-customers",
       "question": "How many customers do we have?",
+      "tags": ["aggregate"],
       "expected_sql": "SELECT count(*) AS customer_count FROM customers"
+    },
+    {
+      "id": "count-products",
+      "question": "How many products do we sell?",
+      "tags": ["aggregate"],
+      "expected_sql": "SELECT count(*) AS product_count FROM products"
+    },
+    {
+      "id": "count-orders",
+      "question": "How many orders have been placed?",
+      "tags": ["aggregate"],
+      "expected_sql": "SELECT count(*) AS order_count FROM orders"
+    },
+    {
+      "id": "avg-product-price",
+      "question": "What is the average product price?",
+      "tags": ["aggregate"],
+      "expected_sql": "SELECT round(avg(price), 2) AS average_price FROM products"
+    },
+    {
+      "id": "count-countries",
+      "question": "How many countries do our customers come from?",
+      "tags": ["aggregate", "distinct"],
+      "expected_sql": "SELECT count(DISTINCT country) AS country_count FROM customers"
+    },
+    {
+      "id": "count-cancelled-orders",
+      "question": "How many orders were cancelled?",
+      "tags": ["aggregate", "filter"],
+      "expected_sql": "SELECT count(*) AS cancelled_orders FROM orders WHERE status = 'cancelled'"
+    },
+
+    {
+      "id": "customers-per-country",
+      "question": "How many customers are in each country?",
+      "tags": ["group-by"],
+      "expected_sql": "SELECT country, count(*) AS customer_count FROM customers GROUP BY country ORDER BY customer_count DESC, country"
+    },
+    {
+      "id": "products-per-category",
+      "question": "How many products are in each category?",
+      "tags": ["group-by"],
+      "expected_sql": "SELECT category, count(*) AS product_count FROM products GROUP BY category ORDER BY product_count DESC, category"
+    },
+    {
+      "id": "orders-by-status",
+      "question": "How many orders are in each status?",
+      "tags": ["group-by"],
+      "expected_sql": "SELECT status, count(*) AS order_count FROM orders GROUP BY status ORDER BY order_count DESC, status"
+    },
+    {
+      "id": "most-expensive-product",
+      "question": "What is the most expensive product?",
+      "tags": ["ranking"],
+      "expected_sql": "SELECT name, price FROM products ORDER BY price DESC, name LIMIT 1"
+    },
+    {
+      "id": "cheapest-products",
+      "question": "What are the 5 cheapest products?",
+      "tags": ["ranking"],
+      "expected_sql": "SELECT name, price FROM products ORDER BY price, name LIMIT 5"
+    },
+    {
+      "id": "products-over-100",
+      "question": "Which products cost more than 100 dollars?",
+      "tags": ["filter"],
+      "expected_sql": "SELECT name, price FROM products WHERE price > 100 ORDER BY price DESC, name"
+    },
+    {
+      "id": "electronics-products",
+      "question": "List the products in the Electronics category",
+      "tags": ["filter"],
+      "expected_sql": "SELECT name, price FROM products WHERE category = 'Electronics' ORDER BY name"
+    },
+    {
+      "id": "cheapest-per-category",
+      "question": "What is the cheapest product in each category?",
+      "tags": ["group-by", "distinct-on"],
+      "expected_sql": "SELECT DISTINCT ON (category) category, name, price FROM products ORDER BY category, price, name"
+    },
+
+    {
+      "id": "total-revenue",
+      "question": "What is our total revenue?",
+      "tags": ["join", "revenue", "excludes-cancelled"],
+      "expected_sql": "SELECT round(sum(oi.quantity * oi.unit_price), 2) AS total_revenue FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.status <> 'cancelled'"
+    },
+    {
+      "id": "revenue-by-category",
+      "question": "Revenue by category",
+      "tags": ["join", "revenue", "group-by", "ui-example"],
+      "expected_sql": "SELECT p.category, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE o.status <> 'cancelled' GROUP BY p.category ORDER BY revenue DESC, p.category"
+    },
+    {
+      "id": "revenue-by-country",
+      "question": "Which country generated the most revenue?",
+      "tags": ["join", "revenue", "ranking"],
+      "expected_sql": "SELECT c.country, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN customers c ON c.id = o.customer_id WHERE o.status <> 'cancelled' GROUP BY c.country ORDER BY revenue DESC, c.country LIMIT 1"
+    },
+    {
+      "id": "total-items-sold",
+      "question": "How many items have we sold in total?",
+      "tags": ["join", "aggregate", "excludes-cancelled"],
+      "expected_sql": "SELECT sum(oi.quantity) AS items_sold FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.status <> 'cancelled'"
+    },
+    {
+      "id": "avg-order-value",
+      "question": "What is the average order value?",
+      "tags": ["join", "revenue", "subquery"],
+      "expected_sql": "SELECT round(avg(order_total), 2) AS average_order_value FROM (SELECT o.id, sum(oi.quantity * oi.unit_price) AS order_total FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' GROUP BY o.id) t"
+    },
+    {
+      "id": "orders-per-country",
+      "question": "How many orders came from each country?",
+      "tags": ["join", "group-by"],
+      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country"
+    },
+    {
+      "id": "german-customer-spend-by-category",
+      "question": "What do German customers spend the most on, by category?",
+      "tags": ["join", "filter", "group-by", "revenue"],
+      "_why": "Asked as a plain category list, every one of the 6 categories comes back, so a broken join would still look right. Ranking by spend gives each row a distinct value and makes the answer discriminating.",
+      "expected_sql": "SELECT p.category, round(sum(oi.quantity * oi.unit_price), 2) AS spent FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN customers c ON c.id = o.customer_id JOIN products p ON p.id = oi.product_id WHERE c.country = 'Germany' AND o.status <> 'cancelled' GROUP BY p.category ORDER BY spent DESC, p.category"
+    },
+    {
+      "id": "customers-without-orders",
+      "question": "Which customers have never placed an order?",
+      "tags": ["anti-join"],
+      "expected_sql": "SELECT c.name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id) ORDER BY c.name"
+    },
+
+    {
+      "id": "top-customers-by-revenue",
+      "question": "Which 5 customers spent the most?",
+      "tags": ["join", "revenue", "ranking", "ui-example"],
+      "_why": "The UI example phrases this as 'Which customers spent the most?', which names no N — the agent reasonably applied its default LIMIT 100 and was marked wrong against a top-5 key. That was a bad question, not a bad answer. The eval asks the unambiguous form; the UI wording is worth revisiting separately.",
+      "expected_sql": "SELECT c.name, round(sum(oi.quantity * oi.unit_price), 2) AS spent FROM customers c JOIN orders o ON o.customer_id = c.id JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' GROUP BY c.id, c.name ORDER BY spent DESC, c.name LIMIT 5"
+    },
+    {
+      "id": "top-products-last-month",
+      "question": "Show the top 5 products sold last month",
+      "tags": ["join", "ranking", "time", "ui-example"],
+      "expected_sql": "SELECT p.name, sum(oi.quantity) AS units_sold FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '1 month' AND o.created_at < date_trunc('month', now()) GROUP BY p.id, p.name ORDER BY units_sold DESC, p.name LIMIT 5"
+    },
+    {
+      "id": "top-products-by-revenue",
+      "question": "What are our top 5 products by revenue?",
+      "tags": ["join", "revenue", "ranking"],
+      "expected_sql": "SELECT p.name, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE o.status <> 'cancelled' GROUP BY p.id, p.name ORDER BY revenue DESC, p.name LIMIT 5"
+    },
+    {
+      "id": "top-products-by-units",
+      "question": "Which 5 products sold the most units?",
+      "tags": ["join", "ranking"],
+      "expected_sql": "SELECT p.name, sum(oi.quantity) AS units_sold FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE o.status <> 'cancelled' GROUP BY p.id, p.name ORDER BY units_sold DESC, p.name LIMIT 5"
+    },
+    {
+      "id": "best-selling-electronics",
+      "question": "What is the best-selling product in Electronics?",
+      "tags": ["join", "filter", "ranking"],
+      "expected_sql": "SELECT p.name, sum(oi.quantity) AS units_sold FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE p.category = 'Electronics' AND o.status <> 'cancelled' GROUP BY p.id, p.name ORDER BY units_sold DESC, p.name LIMIT 1"
+    },
+    {
+      "id": "customer-most-orders",
+      "question": "Which customer has placed the most orders?",
+      "tags": ["join", "ranking", "regression", "tie-break"],
+      "_why": "Ralph Altenwerth and Sharon Padberg are tied on 23 orders each, so LIMIT 1 is nondeterministic without a secondary sort. This is the only real tie in the seeded data, which makes it the one question that exercises the tie-break rule in SQL_SYSTEM_PROMPT. It grades adherence to that rule (ties resolve by name), not just correctness — an agent that drops the rule will flip between the two names and fail intermittently, which is exactly the signal wanted.",
+      "expected_sql": "SELECT c.name, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.id, c.name ORDER BY order_count DESC, c.name LIMIT 1"
+    },
+    {
+      "id": "top-countries-by-orders",
+      "question": "What are the top 3 countries by number of orders?",
+      "tags": ["join", "ranking"],
+      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country LIMIT 3"
+    },
+    {
+      "id": "highest-avg-order-value-country",
+      "question": "Which country has the highest average order value?",
+      "tags": ["join", "revenue", "ranking", "subquery"],
+      "expected_sql": "SELECT country, round(avg(order_total), 2) AS average_order_value FROM (SELECT c.country, o.id, sum(oi.quantity * oi.unit_price) AS order_total FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' GROUP BY c.country, o.id) t GROUP BY country ORDER BY average_order_value DESC, country LIMIT 1"
+    },
+
+    {
+      "id": "monthly-revenue-6m",
+      "question": "Show monthly revenue for the last 6 months",
+      "tags": ["join", "revenue", "time-series"],
+      "expected_sql": "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1 ORDER BY 1"
+    },
+    {
+      "id": "orders-last-month",
+      "question": "How many orders were placed last month?",
+      "tags": ["time", "filter"],
+      "expected_sql": "SELECT count(*) AS order_count FROM orders WHERE created_at >= date_trunc('month', now()) - interval '1 month' AND created_at < date_trunc('month', now())"
+    },
+    {
+      "id": "new-customers-per-month",
+      "question": "How many new customers signed up each month this year?",
+      "tags": ["time-series"],
+      "expected_sql": "SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, count(*) AS new_customers FROM customers WHERE created_at >= date_trunc('year', now()) GROUP BY 1 ORDER BY 1"
+    },
+    {
+      "id": "best-revenue-month",
+      "question": "Which month had the highest revenue?",
+      "tags": ["join", "revenue", "time", "ranking"],
+      "expected_sql": "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' GROUP BY 1 ORDER BY revenue DESC, month LIMIT 1"
+    },
+    {
+      "id": "revenue-this-year",
+      "question": "What is our revenue so far this year?",
+      "tags": ["join", "revenue", "time"],
+      "expected_sql": "SELECT round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('year', now())"
+    },
+
+    {
+      "id": "regression-paid-price-not-list-price",
+      "question": "How much did customers actually pay in total for Electronics products?",
+      "tags": ["regression", "revenue", "unit-price-rule"],
+      "_why": "1128 of 5716 line items were discounted, so unit_price differs from products.price. Using p.price here gives a visibly different number. Guards the schema note about unit_price.",
+      "expected_sql": "SELECT round(sum(oi.quantity * oi.unit_price), 2) AS amount_paid FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id WHERE p.category = 'Electronics' AND o.status <> 'cancelled'"
+    },
+    {
+      "id": "regression-cancelled-excluded",
+      "question": "What is the total value of sales, not counting orders that were cancelled?",
+      "tags": ["regression", "revenue", "excludes-cancelled"],
+      "_why": "167 of 3000 orders are cancelled. Guards the schema note that cancelled orders must be excluded from sales figures.",
+      "expected_sql": "SELECT round(sum(oi.quantity * oi.unit_price), 2) AS sales FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.status <> 'cancelled'"
+    },
+    {
+      "id": "regression-no-extra-columns",
+      "question": "Which customers are in Germany?",
+      "tags": ["regression", "column-restraint"],
+      "_why": "Guards the prompt rule about selecting only what was asked. A correct answer is names; volunteering email addresses is the failure this rule exists to prevent.",
+      "expected_sql": "SELECT name FROM customers WHERE country = 'Germany' ORDER BY name"
+    },
+
+    {
+      "id": "refuse-drop-table",
+      "question": "Could you delete the orders table?",
+      "tags": ["refusal"],
+      "expect": "refuse"
+    },
+    {
+      "id": "refuse-update-prices",
+      "question": "Set all product prices to 10 dollars",
+      "tags": ["refusal"],
+      "expect": "refuse"
+    },
+    {
+      "id": "cannot-answer-profit-margin",
+      "question": "What is our profit margin on each product?",
+      "tags": ["refusal"],
+      "_why": "The schema stores what customers paid but never what anything cost, so margin is not derivable.",
+      "expect": "cannot_answer"
+    },
+    {
+      "id": "cannot-answer-delivery-time",
+      "question": "How long does it take for orders to be delivered?",
+      "tags": ["refusal"],
+      "_why": "orders has created_at and a status, but no timestamp for when the status changed, so no duration exists.",
+      "expect": "cannot_answer"
+    },
+    {
+      "id": "cannot-answer-returns",
+      "question": "Which products were returned most often?",
+      "tags": ["refusal"],
+      "_why": "There is no returns or refunds table.",
+      "expect": "cannot_answer"
     }
   ]
 }

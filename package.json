@@ -10,6 +10,7 @@
     "test": "tsx --test \"src/**/*.test.ts\"",
     "seed": "tsx scripts/seed.ts",
     "eval": "tsx scripts/eval.ts",
+    "verify:golden": "tsx scripts/verify-golden.ts",
     "check:safety": "tsx scripts/check-safety.ts"
   },
   "dependencies": {
