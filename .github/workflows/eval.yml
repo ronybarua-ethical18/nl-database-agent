@@ -1,25 +1,88 @@
-# Milestone 6 — CI gate.
-# Runs the eval suite on every PR and fails the build if accuracy drops
-# below EVAL_THRESHOLD. Enable the real steps once `npm run eval` exists.
+# Milestone 6 — the CI gate.
+#
+# Runs the eval suite on every pull request and fails the build when accuracy
+# drops below EVAL_THRESHOLD, so a change that makes the agent worse cannot be
+# merged quietly.
+#
+# It runs a SUBSET, not all 43 questions. That is a deliberate consequence of
+# the free tier: a full run costs 45-130 model calls and the daily quota is
+# exhausted after roughly 20 questions, so a full-suite gate would fail on
+# quota rather than on quality — the worst kind of red build, because it
+# teaches everyone to ignore it. The subset is the `regression` and `refusal`
+# questions: the ones that guard the rules in SQL_SYSTEM_PROMPT, which is
+# exactly where a prompt edit does its damage. Run the full suite manually
+# before a release.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   DATABASE_URL                  the app_readonly pooled connection string,
+#                                 never the owner one — CI has no reason to
+#                                 hold a credential that can write
+#   GOOGLE_GENERATIVE_AI_API_KEY  https://aistudio.google.com/apikey
 name: eval
 
 on:
   pull_request:
 
+# One run per branch. A push that supersedes an in-flight run cancels it,
+# because every cancelled run is quota handed back.
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   eval:
     runs-on: ubuntu-latest
+    # Forks do not receive secrets, so the job would fail on a missing API key
+    # rather than on anything real. Skip it there instead of reporting red.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
       - run: npm ci
-      # TODO(milestone 6): uncomment once the eval runner is implemented
-      # - run: npm run eval
-      #   env:
-      #     DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      #     GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-      #     EVAL_THRESHOLD: "0.8"
-      - run: echo "eval suite not implemented yet (milestone 5)"
+
+      # Cheap, deterministic, and no API calls: if the SQL guard is broken
+      # there is no point spending quota on the agent.
+      - name: SQL guard tests
+        run: npm test
+
+      # Proves the answer key still executes before it is used to grade
+      # anything. A reference query that silently returns zero rows would
+      # otherwise make every comparison against it meaningless.
+      - name: Verify the golden dataset
+        run: npm run verify:golden
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Eval gate
+        run: npm run eval -- --tag regression,refusal
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # The same provider the app runs on, deliberately.
+          #
+          # This gate ran against Groq first, on the theory that a rule broken
+          # by a prompt edit would break on any model, so CI could use a
+          # cheaper provider. Measured, that was wrong. Llama 3.3 ignores the
+          # CANNOT_ANSWER and column-restraint rules even when they are present
+          # and unmodified: the same 5 refusal questions score 5/5 on Gemini
+          # and 2/5 on Groq. That is a model capability difference, not a
+          # regression, and it left the gate with a permanent floor of 4
+          # failures — a red build that means nothing, which is the one
+          # outcome a gate must never have.
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          # 9 questions, so 0.85 permits one failure and no more. The model is
+          # nondeterministic and an occasional single miss is not a regression;
+          # two at once is.
+          EVAL_THRESHOLD: "0.85"
+          # Pace the calls: the free tier allows roughly 20 a minute and one
+          # question can cost three.
+          EVAL_DELAY_MS: "4000"
+          # A quota outage warns rather than fails. The gate is ~12 calls, far
+          # under a day's budget, but sharing that budget with the live demo
+          # means an outage is possible and must not be mistaken for a
+          # regression.
+          EVAL_ALLOW_SKIPPED: "1"
