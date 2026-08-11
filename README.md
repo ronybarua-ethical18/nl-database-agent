@@ -2,9 +2,20 @@
 
 Ask a Postgres database questions in plain English — the agent writes the SQL, runs it read-only, fixes its own mistakes, and answers with an explanation, a table, and a chart.
 
-> **Live demo:** [nl-database-agent.vercel.app](https://nl-database-agent.vercel.app) · **Eval accuracy:** _not yet measured — see [Evals](#evals)_
+[![eval gate](https://github.com/ronybarua-ethical18/nl-database-agent/actions/workflows/eval.yml/badge.svg?event=pull_request)](https://github.com/ronybarua-ethical18/nl-database-agent/actions/workflows/eval.yml)
+<!-- ?event=pull_request because the gate runs on PRs only — a push trigger
+     would spend the free-tier quota twice for the same commit. -->
 
-<!-- TODO: GIF demo + eval scorecard screenshot here (milestone 7) -->
+> **Live demo:** [nl-database-agent.vercel.app](https://nl-database-agent.vercel.app) — pre-seeded, no signup · **Eval accuracy:** _not yet measured — see [Evals](#evals)_
+
+<!--
+  MEDIA — drop two files into docs/media/ and uncomment the lines below:
+    demo.gif        a 10–15s screen recording: click an example question →
+                    explanation, table and chart appear → open "Show SQL"
+    eval-score.png  a terminal shot of `npm run eval` finishing its scorecard
+-->
+<!-- ![The agent answering a question end to end](docs/media/demo.gif) -->
+<!-- ![Eval scorecard](docs/media/eval-score.png) -->
 
 ## What it does
 
@@ -140,14 +151,3 @@ The gate deliberately runs the **same provider as the app**. It was built agains
 - **`SET LOCAL statement_timeout`, not a connection parameter** — Neon's proxy silently drops `statement_timeout` from the startup packet. This was measured, not assumed: `show statement_timeout` returned 0 and a `pg_sleep(20)` ran to completion. `SET LOCAL` is also correct for a pooled endpoint, since it is released at `COMMIT` and cannot leak into another session's query.
 - **One schema definition** (`src/lib/schema.ts`) — the DDL the seeder executes and the description the LLM reads are built from the same constant, so the prompt cannot drift away from the database.
 - **History in localStorage, not a table** — the app's role has no INSERT privilege, so there is nowhere server-side to write. That constraint suits a public demo: each visitor sees only their own questions, and no history endpoint exists to leak them.
-
-## Roadmap status
-
-- [x] 0 — Skeleton live (Vercel deploy + seeded Neon DB)
-- [x] 1 — Basic text-to-SQL (happy path)
-- [x] 2 — Safety guardrails
-- [x] 3 — Self-correction loop
-- [x] 4 — Answer polish (explanation + chart + Show SQL + examples)
-- [x] 5 — Eval suite
-- [x] 6 — CI gate _(written; the done-when — breaking a prompt turns CI red — is unproven until the repository secrets exist)_
-- [ ] 7 — Portfolio polish
