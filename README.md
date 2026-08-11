@@ -1,4 +1,4 @@
-# Natural-language SQL Agent
+# Natural language Database Agent
 
 Ask a Postgres database questions in plain English — the agent writes the SQL, runs it read-only, fixes its own mistakes, and answers with an explanation, a table, and a chart.
 

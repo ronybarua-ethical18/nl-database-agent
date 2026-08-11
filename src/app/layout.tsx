@@ -22,7 +22,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Natural-language SQL Agent",
+  title: "Natural language Database Agent",
   description:
     "Ask a Postgres database questions in plain English. The agent reads the schema, writes the SQL, runs it read-only, fixes its own mistakes, and answers with an explanation, a table, and a chart.",
 };
