@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code worktrees (project rule: implement in an isolated worktree)
+.claude/worktrees/

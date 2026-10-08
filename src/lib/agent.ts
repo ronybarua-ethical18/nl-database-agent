@@ -1,7 +1,6 @@
-import { generateText, Output } from "ai";
 import { z } from "zod";
 import { runReadOnlyQuery, type QueryResult } from "./db";
-import { getModel } from "./llm";
+import { callLlm } from "./llm";
 import { SCHEMA_DESCRIPTION } from "./schema";
 import { validateSql } from "./sql-guard";
 
@@ -110,9 +109,9 @@ async function generateSqlOnce(
     }
   }
 
-  const { text } = await generateText({
-    model: getModel(),
-    system: SQL_SYSTEM_PROMPT,
+  const { text } = await callLlm({
+    step: attempts.length > 0 ? "sql_fix" : "sql_generation",
+    instructions: SQL_SYSTEM_PROMPT,
     prompt,
   });
   return stripFences(text);
@@ -151,9 +150,9 @@ async function explainResult(
 ): Promise<{ explanation?: string; chart: ChartSpec; note?: string }> {
   const sample = result.rows.slice(0, 25);
   try {
-    const { output } = await generateText({
-      model: getModel(),
-      output: Output.object({ schema: answerSchema }),
+    const { output } = await callLlm({
+      step: "explanation",
+      schema: answerSchema,
       prompt: `A user asked: "${question}"
 
 This SQL answered it:
