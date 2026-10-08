@@ -1,0 +1,142 @@
+# Baseline eval — final result for all 43 questions in evals/golden.json
+# Model: gemini-3.5-flash (default in src/lib/llm.ts). App code at commit 3fdfc34. Run 2026-10-07..08.
+# Each question counted once, on its first measured run; quota skips and a 503 crash were re-run, never dropped.
+# Format: RESULT  id  (SQL attempts; 1 unless shown)
+
+PASS  count-customers
+PASS  count-products
+PASS  count-orders
+PASS  avg-product-price
+PASS  count-countries
+PASS  count-cancelled-orders
+PASS  customers-per-country
+PASS  products-per-category
+PASS  orders-by-status
+PASS  most-expensive-product
+PASS  cheapest-products
+PASS  products-over-100
+FAIL  electronics-products
+PASS  cheapest-per-category
+PASS  total-revenue
+PASS  revenue-by-category
+PASS  revenue-by-country
+PASS  total-items-sold
+PASS  avg-order-value
+FAIL  orders-per-country
+PASS  german-customer-spend-by-category
+PASS  customers-without-orders
+PASS  top-customers-by-revenue
+PASS  top-products-last-month (3 attempts)
+PASS  top-products-by-revenue
+PASS  top-products-by-units (2 attempts)
+PASS  best-selling-electronics
+PASS  customer-most-orders
+FAIL  top-countries-by-orders
+PASS  highest-avg-order-value-country
+FAIL  monthly-revenue-6m
+PASS  orders-last-month
+FAIL  new-customers-per-month
+FAIL  best-revenue-month
+PASS  revenue-this-year
+PASS  regression-paid-price-not-list-price (2 attempts)
+PASS  regression-cancelled-excluded
+PASS  regression-no-extra-columns
+PASS  refuse-drop-table
+PASS  refuse-update-prices
+PASS  cannot-answer-profit-margin
+PASS  cannot-answer-delivery-time
+PASS  cannot-answer-returns
+
+------------------------------------------------------------
+37/43 = 86.0%
+LLM calls (SQL path): 47 total, 1.09 per question, max 3
+self-fix: 3/43 questions needed a retry
+rate-limit (429) waits during the runs: 26
+provider (503) outages during the runs: 2
+Failed:
+  electronics-products
+  orders-per-country
+  top-countries-by-orders
+  monthly-revenue-6m
+  new-customers-per-month
+  best-revenue-month
+
+==== diagnostics | the 6 failures re-run with --verbose — NOT scored
+==== outcome: shows the SQL behind each failure; 2 of 6 passed on this re-run (nondeterminism)
+Running 6 question(s)
+FAIL  electronics-products
+      17 row(s) but different values or extra columns
+      Q: List the products in the Electronics category
+      agent: SELECT name
+FROM products
+WHERE category = 'Electronics'
+ORDER BY name
+LIMIT 100
+      ref:   SELECT name, price FROM products WHERE category = 'Electronics' ORDER BY name
+PASS  orders-per-country
+FAIL  top-countries-by-orders
+      3 row(s) but different values or extra columns
+      Q: What are the top 3 countries by number of orders?
+      agent: SELECT c.country, COUNT(o.id) AS order_count
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+WHERE o.status != 'cancelled'
+GROUP BY c.country
+ORDER BY order_count DESC, c.country ASC
+LIMIT 3
+      ref:   SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country LIMIT 3
+FAIL  monthly-revenue-6m
+      expected 4 row(s), agent returned 5
+      Q: Show monthly revenue for the last 6 months
+      agent: SELECT
+  date_trunc('month', o.created_at) AS month,
+  SUM(oi.quantity * oi.unit_price) AS revenue
+FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+WHERE o.status <> 'cancelled'
+  AND o.created_at >= NOW() - INTERVAL '6 months'
+GROUP BY date_trunc('month', o.created_at)
+ORDER BY month DESC
+      ref:   SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1 ORDER BY 1
+PASS  new-customers-per-month
+FAIL  best-revenue-month
+      1 row(s) but different values or extra columns
+      Q: Which month had the highest revenue?
+      agent: SELECT
+  DATE_TRUNC('month', o.created_at) AS month,
+  SUM(oi.quantity * oi.unit_price) AS total_revenue
+FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+WHERE o.status != 'cancelled'
+GROUP BY DATE_TRUNC('month', o.created_at)
+ORDER BY total_revenue DESC, month ASC
+LIMIT 1
+      ref:   SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' GROUP BY 1 ORDER BY revenue DESC, month LIMIT 1
+------------------------------------------------------------
+Failed:
+  electronics-products — 17 row(s) but different values or extra columns
+  top-countries-by-orders — 3 row(s) but different values or extra columns
+  monthly-revenue-6m — expected 4 row(s), agent returned 5
+  best-revenue-month — 1 row(s) but different values or extra columns
+2/6 = 33.3%
+
+==== token-and-latency sample | 6 questions through askDatabase — NOT scored
+==== method: globalThis.fetch wrapped to read Gemini usageMetadata per call; e2e = question in -> askDatabase returns; no app change
+id | explain | ok | attempts | e2e_ms | llm_calls | input_tokens | output_tokens | thinking_tokens
+count-customers | True | True | 1 | 11345 | 2 | 804 | 67 | 720
+revenue-by-category | True | True | 1 | 8320 | 2 | 982 | 206 | 1092
+top-customers-by-revenue | False | True | 1 | 4565 | 1 | 737 | 90 | 520
+customers-without-orders | False | True | 1 | 4950 | 1 | 737 | 45 | 617
+regression-cancelled-excluded | False | True | 1 | 4308 | 1 | 744 | 46 | 408
+refuse-drop-table | False | False | 0 | 7325 | 3 | 0 | 0 | 0
+per call: id | http | ms | input | output | thinking
+  count-customers | 200 | 2488 | 736 | 9 | 254
+  count-customers | 200 | 3710 | 68 | 58 | 466
+  revenue-by-category | 200 | 3924 | 732 | 100 | 574
+  revenue-by-category | 200 | 3274 | 250 | 106 | 518
+  top-customers-by-revenue | 200 | 3446 | 737 | 90 | 520
+  customers-without-orders | 200 | 3835 | 737 | 45 | 617
+  regression-cancelled-excluded | 200 | 3191 | 744 | 46 | 408
+  refuse-drop-table | 429 | 494 | - | - | -
+  refuse-drop-table | 429 | 416 | - | - | -
+  refuse-drop-table | 429 | 409 | - | - | -
