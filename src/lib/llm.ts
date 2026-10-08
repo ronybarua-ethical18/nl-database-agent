@@ -1,6 +1,6 @@
 import { google } from "@ai-sdk/google";
 import { groq } from "@ai-sdk/groq";
-import { generateText, Output, type LanguageModel } from "ai";
+import { generateText, Output, type FinishReason, type LanguageModel } from "ai";
 import type { z } from "zod";
 
 /**
@@ -15,21 +15,22 @@ import type { z } from "zod";
  *  - google: Gemini Flash via https://aistudio.google.com
  *  - groq:   Llama via https://console.groq.com
  */
-function getModel(): LanguageModel {
-  const provider = process.env.LLM_PROVIDER ?? "google";
-  if (provider === "groq") {
-    return groq(process.env.LLM_MODEL ?? "llama-3.3-70b-versatile");
-  }
-  return google(process.env.LLM_MODEL ?? "gemini-3.5-flash");
-}
-
-/** The provider and model actually in use, for the Settings panel. */
-export function describeModel(): { provider: string; model: string } {
+function resolveModel(): { provider: string; model: string } {
   const provider = process.env.LLM_PROVIDER ?? "google";
   const model =
     process.env.LLM_MODEL ??
     (provider === "groq" ? "llama-3.3-70b-versatile" : "gemini-3.5-flash");
   return { provider, model };
+}
+
+function getModel(): LanguageModel {
+  const { provider, model } = resolveModel();
+  return provider === "groq" ? groq(model) : google(model);
+}
+
+/** The provider and model actually in use, for the Settings panel. */
+export function describeModel(): { provider: string; model: string } {
+  return resolveModel();
 }
 
 /**
@@ -75,6 +76,13 @@ export interface LlmUsage {
 
 export interface LlmTextResponse {
   text: string;
+  /**
+   * Why the model stopped. "stop" is a complete answer; "length" means the
+   * output budget ran out and `text` is cut off mid-way. Callers decide what
+   * that means for their step; this module only reports it.
+   */
+  finishReason: FinishReason;
+  /** Counts the provider reported; a count it did not report is 0. */
   usage: LlmUsage;
   /**
    * The model id the provider reported, or the id requested when it reports
@@ -103,7 +111,7 @@ export async function callLlm<T>(
   req: LlmTextRequest | LlmObjectRequest<T>,
   opts: LlmOptions = {},
 ): Promise<LlmTextResponse | LlmObjectResponse<T>> {
-  const start = Date.now();
+  const start = performance.now();
   // Provider errors are deliberately not caught here. Callers decide what a
   // rate limit or a malformed object means for their step.
   const result = await generateText({
@@ -115,13 +123,20 @@ export async function callLlm<T>(
 
   const response: LlmTextResponse = {
     text: result.text,
+    finishReason: result.finishReason,
     usage: {
       inputTokens: result.usage.inputTokens ?? 0,
       outputTokens: result.usage.outputTokens ?? 0,
       reasoningTokens: result.usage.outputTokenDetails?.reasoningTokens ?? 0,
     },
     model: result.finalStep.response.modelId,
-    latencyMs: Date.now() - start,
+    latencyMs: Math.round(performance.now() - start),
   };
-  return req.schema ? { ...response, output: result.output as T } : response;
+  if (!req.schema) return response;
+  // generateText has already validated the JSON against the schema (a mismatch
+  // throws NoObjectGeneratedError); reading `output` throws
+  // NoOutputGeneratedError when the call did not finish with "stop". Both
+  // reach the caller unchanged, exactly as when agent.ts called the SDK
+  // directly. The cast is safe because `output` is typed from the schema.
+  return { ...response, output: result.output as T };
 }
