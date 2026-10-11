@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type { LlmCallLog, LlmStep } from "../src/lib/llm";
 import {
   formatSummary,
-  isDbTransient,
   parseThreshold,
   percentile,
   summarize,
@@ -89,6 +88,9 @@ test("self-fix rate: passed after more than one attempt, over measured cases", (
     kase({ status: "fail", attempts: 3 }), // retried, but never fixed
     kase({ status: "pass", attempts: 1 }),
     kase({ status: "pass", attempts: 1 }),
+    // A broken key: measured, but the agent was never asked, so it is not a
+    // chance to self-fix and stays out of the denominator.
+    kase({ status: "fail", attempts: 0, latencyMs: undefined }),
   ]);
   assert.equal(s.selfFixRate, 1 / 4);
 });
@@ -182,22 +184,11 @@ test("formatSummary prints the baseline metrics", () => {
   ]);
 });
 
-test("formatSummary says n/a for latency when nothing was measured", () => {
+test("formatSummary says n/a, not 0.0%, when nothing was measured", () => {
+  // "accuracy: 0.0%" would read as a catastrophic score, not an absent one.
   const lines = formatSummary(summarize([kase({ status: "skipped" })]));
+  assert.equal(lines[0], "cases: 1   measured: 0   passed: 0   accuracy: n/a");
   assert.ok(lines.includes("latency/question: n/a"));
-});
-
-test("database connection failures are transient; SQL errors are not", () => {
-  // postgres.js puts the reason on err.code.
-  const timeout = Object.assign(new Error("write CONNECT_TIMEOUT host:5432"), {
-    code: "CONNECT_TIMEOUT",
-  });
-  const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
-  const syntax = Object.assign(new Error('syntax error at or near "SELEC"'), { code: "42601" });
-  assert.equal(isDbTransient(timeout), true);
-  assert.equal(isDbTransient(reset), true);
-  assert.equal(isDbTransient(syntax), false);
-  assert.equal(isDbTransient("CONNECT_TIMEOUT"), false); // not an error object
 });
 
 test("threshold: unset or blank means the default; 0 turns the check off", () => {
@@ -213,18 +204,6 @@ test("threshold: anything that is not a number in [0, 1] is an error, not 'off'"
   for (const raw of ["abc", "85", "-0.1", "1.5", "NaN", "Infinity"]) {
     assert.throws(() => parseThreshold(raw), /EVAL_THRESHOLD/, raw);
   }
-});
-
-test("Postgres connection-class errors and DNS hiccups are transient too", () => {
-  const withCode = (code: string) => Object.assign(new Error(code), { code });
-  // 08xxx: connection exceptions; 57P01/57P03: server shutting down / not
-  // yet accepting connections (a Neon compute waking up); EAI_AGAIN: DNS.
-  for (const code of ["08006", "08001", "57P01", "57P03", "EAI_AGAIN"]) {
-    assert.equal(isDbTransient(withCode(code)), true, code);
-  }
-  // Other class 57 errors are not about reachability: 57014 is a statement
-  // timeout, which a broken reference query can cause.
-  assert.equal(isDbTransient(withCode("57014")), false);
 });
 
 test("a broken answer key fails accuracy but not the per-question averages", () => {

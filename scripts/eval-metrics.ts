@@ -16,7 +16,11 @@ export type CaseResult = {
   reason?: string;
   /** SQL attempts the agent made for the graded answer (1 = no self-fix). */
   attempts: number;
-  /** Question in → `askDatabase` returns, for the graded answer. */
+  /**
+   * Question in → `askDatabase` returns, for the graded answer. Present
+   * exactly when the agent was asked: absent for skipped cases and for a
+   * broken answer key, which is how the per-question averages leave those out.
+   */
   latencyMs?: number;
   /** The calls behind the graded answer. */
   calls: LlmCallLog[];
@@ -46,7 +50,7 @@ export type EvalSummary = {
   /** passed / measured; 0 when nothing was measured. */
   accuracy: number;
   callsPerQuestion: { avg: number; max: number };
-  /** Measured cases that passed after more than one SQL attempt. */
+  /** Asked cases that passed after more than one SQL attempt. */
   selfFixRate: number;
   /**
    * Averages per measured question over successful calls. `out` is every
@@ -123,9 +127,9 @@ export function summarize(cases: CaseResult[]): EvalSummary {
       max: Math.max(0, ...asked.map((c) => c.calls.length)),
     },
     selfFixRate:
-      measured.length === 0
+      asked.length === 0
         ? 0
-        : measured.filter((c) => c.status === "pass" && c.attempts > 1).length / measured.length,
+        : asked.filter((c) => c.status === "pass" && c.attempts > 1).length / asked.length,
     tokensPerQuestion: {
       in: perQuestion("in"),
       out: perQuestion("out"),
@@ -146,7 +150,8 @@ const tokens = (i: number, o: number, r: number) => `${int(i)} in / ${int(o)} ou
 /** The printed scorecard: the same metrics as docs/baseline.md. */
 export function formatSummary(s: EvalSummary): string[] {
   const lines = [
-    `cases: ${s.cases}   measured: ${s.measured}   passed: ${s.passed}   accuracy: ${pct(s.accuracy)}`,
+    // "0.0%" over nothing would read as a catastrophic score, not an absent one.
+    `cases: ${s.cases}   measured: ${s.measured}   passed: ${s.passed}   accuracy: ${s.measured === 0 ? "n/a" : pct(s.accuracy)}`,
     `llm calls/question: ${s.callsPerQuestion.avg.toFixed(2)} avg, ${s.callsPerQuestion.max} max   self-fix rate: ${pct(s.selfFixRate)}`,
     `tokens/question: ${tokens(s.tokensPerQuestion.in, s.tokensPerQuestion.out, s.tokensPerQuestion.reasoning)}`,
     s.latencyMs.p50 === null
@@ -183,28 +188,4 @@ export function parseThreshold(raw: string | undefined): number {
     throw new Error(`EVAL_THRESHOLD must be a fraction between 0 and 1, got "${raw}".`);
   }
   return value;
-}
-
-/**
- * Codes postgres.js and Node put on `err.code` when the database could not be
- * reached or dropped the connection — Neon waking from idle, mostly. A
- * reference query that fails this way says nothing about the answer key.
- */
-const DB_TRANSIENT_CODES = new Set([
-  "CONNECT_TIMEOUT",
-  "CONNECTION_CLOSED",
-  "CONNECTION_ENDED",
-  "ECONNRESET",
-  "ECONNREFUSED",
-  "ETIMEDOUT",
-  "EAI_AGAIN", // DNS lookup failed for now
-  "57P01", // admin_shutdown: the compute is being suspended
-  "57P03", // cannot_connect_now: the compute is still starting
-]);
-
-export function isDbTransient(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const code = String((err as Error & { code?: unknown }).code);
-  // SQLSTATE class 08: connection exceptions.
-  return DB_TRANSIENT_CODES.has(code) || /^08[0-9A-Z]{3}$/.test(code);
 }

@@ -54,13 +54,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import postgres from "postgres";
 import { askDatabase, type AgentResult } from "../src/lib/agent";
 import { describeModel, onLlmCall, type LlmCallLog } from "../src/lib/llm";
-import {
-  formatSummary,
-  isDbTransient,
-  parseThreshold,
-  summarize,
-  type CaseResult,
-} from "./eval-metrics";
+import { formatSummary, parseThreshold, summarize, type CaseResult } from "./eval-metrics";
+import { isDbTransient, isDbTransientMessage, isProviderOutage } from "./transient";
 
 type Question = {
   id: string;
@@ -199,32 +194,31 @@ function arg(flag: string): string | undefined {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Provider outages that are not quota: 503 UNAVAILABLE ("high demand"), a
- * dropped connection, or the SDK's own retry giving up on either. The agent
- * rethrows these, correctly — in the app they are a generic failure, not the
- * user's doing. In a run they measure nothing about the agent, so the runner
- * treats them like a rate limit: wait, retry, then skip rather than crash the
- * whole batch. The log line says which it was, so the baseline's 429 count is
- * not inflated by outages.
+ * One attempt at a question; a transient failure comes back as a reason, not
+ * a throw. Rate limits, provider outages and database outages all measure
+ * nothing about the agent, so the runner waits them out (see transient.ts).
  */
-function isProviderOutage(err: unknown): boolean {
-  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
-  return /\b503\b|UNAVAILABLE|high demand|overloaded|ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|Cannot connect to API/i.test(
-    text,
-  );
-}
-
-/** One attempt at a question; a transient failure comes back as a reason, not a throw. */
 async function askOnce(question: string): Promise<AgentResult | { transient: string }> {
+  let result: AgentResult;
   try {
     // explain: false — grading never reads the prose or the chart, and the
     // call it saves is a third of the run's quota.
-    const result = await askDatabase(question, { explain: false });
-    return result.rateLimited ? { transient: "rate limited" } : result;
+    result = await askDatabase(question, { explain: false });
   } catch (err) {
+    if (isDbTransient(err)) return { transient: "database unavailable" };
     if (isProviderOutage(err)) return { transient: "provider unavailable" };
     throw err;
   }
+  if (result.rateLimited) return { transient: "rate limited" };
+  // The agent treats any failed query as its own mistake and asks the model
+  // for a fix. When the database was simply unreachable, that fix call, the
+  // extra attempt and possibly a FAIL would be charged to the agent, so the
+  // whole question is asked again instead. The app is unchanged: this only
+  // decides what the eval counts.
+  if (result.attempts.some((a) => a.error !== undefined && isDbTransientMessage(a.error))) {
+    return { transient: "database unavailable" };
+  }
+  return result;
 }
 
 type Rows = Record<string, unknown>[];
@@ -255,17 +249,21 @@ async function runReference(
   }
 }
 
-/** The commit under test, for eval-results.json; null when it cannot be told. */
+/**
+ * The commit under test, for eval-results.json; null when it cannot be told.
+ * A local run with uncommitted changes to tracked files is marked "-dirty":
+ * those numbers measured code that commit does not contain.
+ */
 function commitSha(): string | null {
   // CI passes the PR's head commit: on pull_request events GITHUB_SHA is a
   // temporary merge commit that exists on no branch.
   const fromEnv = process.env.EVAL_COMMIT || process.env.GITHUB_SHA;
   if (fromEnv) return fromEnv.slice(0, 7);
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   try {
-    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    const sha = git("rev-parse", "--short=7", "HEAD");
+    return git("status", "--porcelain", "--untracked-files=no") === "" ? sha : `${sha}-dirty`;
   } catch {
     return null;
   }
@@ -330,113 +328,135 @@ async function main(): Promise<void> {
 
   console.log(`Running ${questions.length} question(s)\n`);
   const cases: CaseResult[] = [];
+  /** The agent's own failure messages, for the console only (see grade). */
+  const details = new Map<string, string>();
+  /**
+   * An unexpected error from the agent ends the run, as before, but only
+   * after the summary and the results file cover what did run: a crashed
+   * gate is exactly when those details matter.
+   */
+  let crash: { error: unknown } | null = null;
 
-  for (const q of questions) {
-    const tagsOf = q.tags ?? [];
+  try {
+    for (const q of questions) {
+      const tagsOf = q.tags ?? [];
 
-    // The reference query defines the correct answer, so a failure here is a
-    // broken answer key, not a wrong agent. Say which it is.
-    let expectedRows: Rows | null = null;
-    if (q.expected_sql) {
-      const ref = await runReference(sql, q.expected_sql);
-      if ("unavailable" in ref) {
-        console.log(`SKIP  ${q.id} — database unavailable, not measured`);
+      // The reference query defines the correct answer, so a failure here is a
+      // broken answer key, not a wrong agent. Say which it is.
+      let expectedRows: Rows | null = null;
+      if (q.expected_sql) {
+        const ref = await runReference(sql, q.expected_sql);
+        if ("unavailable" in ref) {
+          console.log(`SKIP  ${q.id} — database unavailable, not measured`);
+          cases.push({
+            id: q.id,
+            tags: tagsOf,
+            status: "skipped",
+            reason: "database unavailable after retries",
+            attempts: 0,
+            calls: [],
+            discardedCalls: [],
+          });
+          continue;
+        }
+        if ("broken" in ref) {
+          console.log(`BROKEN KEY  ${q.id}`);
+          console.log(`            ${ref.broken}`);
+          cases.push({
+            id: q.id,
+            tags: tagsOf,
+            status: "fail",
+            reason: "reference SQL failed to run — fix the golden file",
+            attempts: 0,
+            calls: [],
+            discardedCalls: [],
+          });
+          continue;
+        }
+        expectedRows = ref.rows;
+      }
+
+      // Calls from tries that are thrown away still cost quota; they are kept
+      // for the 429/503 counts but not for the per-question numbers.
+      const discardedCalls: LlmCallLog[] = [];
+      let run = await ask(q.question);
+
+      // A quota refusal or a provider outage measures nothing about the agent,
+      // so it must never be scored as a wrong answer. Wait and ask again.
+      for (let retry = 0; "transient" in run.outcome && retry < RATE_LIMIT_RETRIES; retry++) {
+        discardedCalls.push(...run.calls);
+        const wait = RATE_LIMIT_BACKOFF_MS * (retry + 1);
+        console.log(`      ${run.outcome.transient} — waiting ${Math.round(wait / 1000)}s (retry ${retry + 1}/${RATE_LIMIT_RETRIES})`);
+        await sleep(wait);
+        run = await ask(q.question);
+      }
+
+      if ("transient" in run.outcome) {
+        // Still failing. Record it as unmeasured rather than failed: a score
+        // computed over questions that never ran would be a fiction.
+        discardedCalls.push(...run.calls);
+        console.log(`SKIP  ${q.id} — ${run.outcome.transient}, not measured`);
         cases.push({
           id: q.id,
           tags: tagsOf,
           status: "skipped",
-          reason: "database unavailable after retries",
+          reason: `${run.outcome.transient} after retries`,
           attempts: 0,
           calls: [],
-          discardedCalls: [],
+          discardedCalls,
         });
         continue;
       }
-      if ("broken" in ref) {
-        console.log(`BROKEN KEY  ${q.id}`);
-        console.log(`            ${ref.broken}`);
-        cases.push({
-          id: q.id,
-          tags: tagsOf,
-          status: "fail",
-          reason: "reference SQL failed to run — fix the golden file",
-          attempts: 0,
-          calls: [],
-          discardedCalls: [],
-        });
-        continue;
-      }
-      expectedRows = ref.rows;
-    }
+      const result = run.outcome;
 
-    // Calls from tries that are thrown away still cost quota; they are kept
-    // for the 429/503 counts but not for the per-question numbers.
-    const discardedCalls: LlmCallLog[] = [];
-    let run = await ask(q.question);
+      const { pass, reason, detail } = grade(q, result, expectedRows);
 
-    // A quota refusal or a provider outage measures nothing about the agent,
-    // so it must never be scored as a wrong answer. Wait and ask again.
-    for (let retry = 0; "transient" in run.outcome && retry < RATE_LIMIT_RETRIES; retry++) {
-      discardedCalls.push(...run.calls);
-      const wait = RATE_LIMIT_BACKOFF_MS * (retry + 1);
-      console.log(`      ${run.outcome.transient} — waiting ${Math.round(wait / 1000)}s (retry ${retry + 1}/${RATE_LIMIT_RETRIES})`);
-      await sleep(wait);
-      run = await ask(q.question);
-    }
-
-    if ("transient" in run.outcome) {
-      // Still failing. Record it as unmeasured rather than failed: a score
-      // computed over questions that never ran would be a fiction.
-      discardedCalls.push(...run.calls);
-      console.log(`SKIP  ${q.id} — ${run.outcome.transient}, not measured`);
       cases.push({
         id: q.id,
         tags: tagsOf,
-        status: "skipped",
-        reason: `${run.outcome.transient} after retries`,
-        attempts: 0,
-        calls: [],
+        status: pass ? "pass" : "fail",
+        reason,
+        attempts: result.attempts.length,
+        latencyMs: run.ms,
+        calls: run.calls,
         discardedCalls,
       });
-      continue;
+
+      const retries = result.attempts.length > 1 ? ` (${result.attempts.length} attempts)` : "";
+      console.log(`${pass ? "PASS" : "FAIL"}  ${q.id}${retries}`);
+      if (detail) details.set(q.id, detail);
+      if (!pass) console.log(`      ${reason}${detail ? `: ${detail}` : ""}`);
+      if (!pass && verbose) {
+        console.log(`      Q: ${q.question}`);
+        if (result.sql) console.log(`      agent: ${result.sql}`);
+        if (q.expected_sql) console.log(`      ref:   ${q.expected_sql}`);
+      }
+
+      if (DELAY_MS > 0) await sleep(DELAY_MS);
     }
-    const result = run.outcome;
-
-    const { pass, reason, detail } = grade(q, result, expectedRows);
-
-    cases.push({
-      id: q.id,
-      tags: tagsOf,
-      status: pass ? "pass" : "fail",
-      reason,
-      attempts: result.attempts.length,
-      latencyMs: run.ms,
-      calls: run.calls,
-      discardedCalls,
-    });
-
-    const retries = result.attempts.length > 1 ? ` (${result.attempts.length} attempts)` : "";
-    console.log(`${pass ? "PASS" : "FAIL"}  ${q.id}${retries}`);
-    if (!pass) console.log(`      ${reason}${detail ? `: ${detail}` : ""}`);
-    if (!pass && verbose) {
-      console.log(`      Q: ${q.question}`);
-      if (result.sql) console.log(`      agent: ${result.sql}`);
-      if (q.expected_sql) console.log(`      ref:   ${q.expected_sql}`);
-    }
-
-    if (DELAY_MS > 0) await sleep(DELAY_MS);
+  } catch (error) {
+    crash = { error };
+  } finally {
+    await sql.end();
   }
-
-  await sql.end();
 
   const summary = summarize(cases);
   const failures = cases.filter((c) => c.status === "fail");
   const skipped = cases.filter((c) => c.status === "skipped");
 
   console.log("\n" + "-".repeat(60));
+  if (crash) {
+    console.log(
+      `ABORTED after ${cases.length} of ${questions.length} question(s); ` +
+        "the numbers below cover only those. The error follows the summary.\n",
+    );
+  }
   if (failures.length > 0) {
     console.log("Failed:");
-    for (const f of failures) console.log(`  ${f.id} — ${f.reason}`);
+    for (const f of failures) {
+      const detail = details.get(f.id);
+      console.log(`  ${f.id} — ${f.reason}${detail ? `: ${detail}` : ""}`);
+    }
     console.log("");
   }
   for (const line of formatSummary(summary)) console.log(line);
@@ -456,6 +476,8 @@ async function main(): Promise<void> {
         model,
         filter: { only, tag: tags },
         threshold: THRESHOLD,
+        // The error class that ended the run early, or null for a full run.
+        aborted: crash ? (crash.error instanceof Error ? crash.error.name : typeof crash.error) : null,
         summary,
         // null rather than a missing key, so readers see every field.
         cases: cases.map((c) => ({
@@ -505,11 +527,16 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   }
 
-  if (THRESHOLD > 0) {
+  // Skipped when nothing was measured: that already failed above, and
+  // "NOT met" against no score would read as a real 0%.
+  if (THRESHOLD > 0 && summary.measured > 0) {
     const ok = summary.accuracy >= THRESHOLD;
     console.log(`threshold ${(THRESHOLD * 100).toFixed(1)}% — ${ok ? "met" : "NOT met"}`);
     if (!ok) process.exitCode = 1;
   }
+
+  // Rethrown last, so main().catch prints it and exits 1 as it always has.
+  if (crash) throw crash.error;
 }
 
 main().catch((err) => {
