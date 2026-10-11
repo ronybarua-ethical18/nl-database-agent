@@ -1,9 +1,22 @@
-import { test } from "node:test";
+import { beforeEach, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { NoObjectGeneratedError, NoOutputGeneratedError } from "ai";
+import { APICallError, NoObjectGeneratedError, NoOutputGeneratedError, RetryError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { callLlm } from "./llm";
+
+/**
+ * callLlm writes one llm_call line per call to stdout. Every test gets a
+ * silent console.log, which keeps the test output clean and lets the logging
+ * tests read back what was written.
+ */
+let logged: () => string[] = () => [];
+beforeEach((t) => {
+  // @types/node types a top-level hook's context as TestContext | SuiteContext;
+  // at runtime a beforeEach hook receives the context of the test it runs for.
+  const log = (t as TestContext).mock.method(console, "log", () => {});
+  logged = () => log.mock.calls.map((c) => String(c.arguments[0]));
+});
 
 /**
  * Builds the result shape the V4 model interface expects from doGenerate.
@@ -139,5 +152,152 @@ test("output that does not match the schema throws NoObjectGeneratedError", asyn
   await assert.rejects(
     callLlm({ step: "explanation", prompt: "Q", schema: z.object({ a: z.number() }) }, { model }),
     (err) => NoObjectGeneratedError.isInstance(err),
+  );
+});
+
+/** The llm_call entries the current test has logged, parsed. */
+function entries(): Record<string, unknown>[] {
+  return logged()
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((e) => e.evt === "llm_call");
+}
+
+function apiError(statusCode: number) {
+  return new APICallError({
+    message: `HTTP ${statusCode}`,
+    url: "https://provider.test",
+    requestBodyValues: {},
+    statusCode,
+    isRetryable: false,
+  });
+}
+
+test("a successful call logs one llm_call line with its metadata", async () => {
+  const model = mockModel(mockResult("x", { input: 10, output: 5, reasoning: 3 }));
+  await callLlm({ step: "sql_generation", prompt: "Q" }, { model });
+
+  assert.equal(entries().length, 1);
+  const { ms, ...rest } = entries()[0];
+  assert.deepEqual(rest, {
+    evt: "llm_call",
+    step: "sql_generation",
+    ok: true,
+    model: "mock-model",
+    in: 10,
+    out: 5,
+    reasoning: 3,
+    finish: "stop",
+  });
+  assert.equal(typeof ms, "number");
+  assert.ok((ms as number) >= 0);
+});
+
+test("each call logs its own step", async () => {
+  await callLlm({ step: "sql_fix", prompt: "Q" }, { model: mockModel(mockResult("x")) });
+  await callLlm(
+    { step: "explanation", prompt: "Q", schema: z.object({ a: z.number() }) },
+    { model: mockModel(mockResult('{"a":1}')) },
+  );
+  assert.deepEqual(
+    entries().map((e) => e.step),
+    ["sql_fix", "explanation"],
+  );
+});
+
+test("a cut-off answer logs finish length", async () => {
+  const model = mockModel(mockResult("SELECT * FROM cust", {}, "length"));
+  await callLlm({ step: "sql_generation", prompt: "Q" }, { model });
+  assert.equal(entries()[0].finish, "length");
+});
+
+test("the log line carries no prompt, instructions, text or output", async () => {
+  const model = mockModel(mockResult('{"secret":"ROWDATA_7"}'));
+  await callLlm(
+    {
+      step: "explanation",
+      instructions: "INSTRUCTIONS_7",
+      prompt: "PROMPT_7",
+      schema: z.object({ secret: z.string() }),
+    },
+    { model },
+  );
+  const written = logged().join("\n");
+  assert.ok(written.includes("llm_call"), "nothing was logged");
+  for (const sentinel of ["INSTRUCTIONS_7", "PROMPT_7", "ROWDATA_7", "secret"]) {
+    assert.equal(written.includes(sentinel), false, `log leaked ${sentinel}`);
+  }
+});
+
+test("a failed call is logged with ok false and rethrown unchanged", async () => {
+  const boom = new TypeError("PROMPT_ECHO in provider message");
+  const model = mockModel(() => {
+    throw boom;
+  });
+  await assert.rejects(
+    callLlm({ step: "sql_fix", prompt: "Q" }, { model }),
+    (err) => err === boom,
+  );
+
+  assert.equal(entries().length, 1);
+  const { ms, ...rest } = entries()[0];
+  // No token fields: a failed call must not read as a free one. No message:
+  // provider messages can echo the prompt.
+  assert.deepEqual(rest, {
+    evt: "llm_call",
+    step: "sql_fix",
+    ok: false,
+    model: "mock-model",
+    error: "TypeError",
+  });
+  assert.equal(typeof ms, "number");
+});
+
+test("a provider HTTP error logs its status", async () => {
+  const err503 = apiError(503);
+  const model = mockModel(() => {
+    throw err503;
+  });
+  await assert.rejects(
+    callLlm({ step: "sql_generation", prompt: "Q" }, { model }),
+    (err) => err === err503,
+  );
+  assert.equal(entries()[0].error, "AI_APICallError");
+  assert.equal(entries()[0].status, 503);
+});
+
+test("a rate limit that outlasted the SDK's retries logs status 429", async () => {
+  const exhausted = new RetryError({
+    message: "Failed after 3 attempts",
+    reason: "maxRetriesExceeded",
+    errors: [apiError(429), apiError(429)],
+  });
+  const model = mockModel(() => {
+    throw exhausted;
+  });
+  await assert.rejects(callLlm({ step: "explanation", prompt: "Q" }, { model }));
+  assert.equal(entries()[0].error, "AI_RetryError");
+  assert.equal(entries()[0].status, 429);
+});
+
+test("schema failures are logged as failed calls", async () => {
+  const schema = z.object({ a: z.number() });
+  await assert.rejects(
+    callLlm(
+      { step: "explanation", prompt: "Q", schema },
+      { model: mockModel(mockResult('{"b":"x"}')) },
+    ),
+  );
+  await assert.rejects(
+    callLlm(
+      { step: "explanation", prompt: "Q", schema },
+      { model: mockModel(mockResult('{"a":', {}, "length")) },
+    ),
+  );
+  assert.deepEqual(
+    entries().map((e) => [e.ok, e.error]),
+    [
+      [false, "AI_NoObjectGeneratedError"],
+      [false, "AI_NoOutputGeneratedError"],
+    ],
   );
 });
