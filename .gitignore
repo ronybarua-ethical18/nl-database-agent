@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Claude Code worktrees (project rule: implement in an isolated worktree)
 .claude/worktrees/
+
+# per-run eval output (npm run eval); baselines are recorded in docs/
+eval-results.json

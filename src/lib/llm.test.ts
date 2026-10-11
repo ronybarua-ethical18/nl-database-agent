@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { APICallError, NoObjectGeneratedError, NoOutputGeneratedError, RetryError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { callLlm } from "./llm";
+import { callLlm, onLlmCall, type LlmCallLog } from "./llm";
 
 /**
  * callLlm writes one llm_call line per call to stdout. Every test gets a
@@ -300,4 +300,66 @@ test("schema failures are logged as failed calls", async () => {
       [false, "AI_NoOutputGeneratedError"],
     ],
   );
+});
+
+test("a listener receives every entry that is logged, failures included", async (t) => {
+  const seen: LlmCallLog[] = [];
+  t.after(onLlmCall((e) => seen.push(e)));
+
+  await callLlm({ step: "sql_generation", prompt: "Q" }, { model: mockModel(mockResult("x")) });
+  await assert.rejects(
+    callLlm(
+      { step: "sql_fix", prompt: "Q" },
+      {
+        model: mockModel(() => {
+          throw new Error("boom");
+        }),
+      },
+    ),
+  );
+
+  assert.deepEqual(seen, entries());
+  assert.deepEqual(
+    seen.map((e) => [e.step, e.ok]),
+    [
+      ["sql_generation", true],
+      ["sql_fix", false],
+    ],
+  );
+});
+
+test("a throwing listener changes neither the result nor the error", async (t) => {
+  t.after(
+    onLlmCall(() => {
+      throw new Error("listener bug");
+    }),
+  );
+  const res = await callLlm(
+    { step: "sql_generation", prompt: "Q" },
+    { model: mockModel(mockResult("SELECT 1")) },
+  );
+  assert.equal(res.text, "SELECT 1");
+
+  const boom = new Error("provider down");
+  await assert.rejects(
+    callLlm(
+      { step: "sql_generation", prompt: "Q" },
+      {
+        model: mockModel(() => {
+          throw boom;
+        }),
+      },
+    ),
+    (err) => err === boom,
+  );
+});
+
+test("an unsubscribed listener receives nothing more", async () => {
+  const seen: LlmCallLog[] = [];
+  const unsubscribe = onLlmCall((e) => seen.push(e));
+  await callLlm({ step: "sql_generation", prompt: "Q" }, { model: mockModel(mockResult("x")) });
+  unsubscribe();
+  await callLlm({ step: "sql_generation", prompt: "Q" }, { model: mockModel(mockResult("x")) });
+  assert.equal(seen.length, 1);
+  assert.equal(entries().length, 2);
 });
