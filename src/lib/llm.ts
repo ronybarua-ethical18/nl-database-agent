@@ -1,6 +1,13 @@
 import { google } from "@ai-sdk/google";
 import { groq } from "@ai-sdk/groq";
-import { generateText, Output, type FinishReason, type LanguageModel } from "ai";
+import {
+  APICallError,
+  generateText,
+  Output,
+  RetryError,
+  type FinishReason,
+  type LanguageModel,
+} from "ai";
 import type { z } from "zod";
 
 /**
@@ -9,7 +16,8 @@ import type { z } from "zod";
  * Every model call in the app goes through `callLlm`, so pointing the app at
  * the model router later is a change here (or in env), not in the callers.
  * Each call carries a `step` name: the router's task hint and the dashboard's
- * cost-by-step key. Nothing is logged yet; that is the next task.
+ * cost-by-step key. Every call, failed ones included, writes one `llm_call`
+ * JSON line to stdout (see `LlmCallLog`).
  *
  * Both providers have generous free tiers:
  *  - google: Gemini Flash via https://aistudio.google.com
@@ -102,6 +110,48 @@ export interface LlmOptions {
   model?: LanguageModel;
 }
 
+/**
+ * The one line `callLlm` writes per call. Metadata only: never the prompt,
+ * the instructions, the SQL, the rows, the model's text or an error message
+ * (provider messages can echo the prompt).
+ */
+export type LlmCallLog = {
+  evt: "llm_call";
+  step: LlmStep;
+  /** The model that answered, or on failure the model that was asked. */
+  model: string;
+  ms: number;
+} & (
+  | {
+      ok: true;
+      in: number;
+      /** Total output tokens, thinking included; `reasoning` is a share of it. */
+      out: number;
+      reasoning: number;
+      finish: FinishReason;
+    }
+  | {
+      ok: false;
+      /** The error class name, e.g. AI_RetryError or AI_NoObjectGeneratedError. */
+      error: string;
+      /** HTTP status when the provider sent one, so 429s and 503s are countable. */
+      status?: number;
+    }
+);
+
+function logLlmCall(entry: LlmCallLog): void {
+  console.log(JSON.stringify(entry));
+}
+
+/**
+ * The provider's HTTP status, if any. A rate limit that outlasts the SDK's
+ * own retries arrives as a RetryError wrapping the last APICallError.
+ */
+function statusOf(err: unknown): number | undefined {
+  const cause = RetryError.isInstance(err) ? err.lastError : err;
+  return APICallError.isInstance(cause) ? cause.statusCode : undefined;
+}
+
 export function callLlm(req: LlmTextRequest, opts?: LlmOptions): Promise<LlmTextResponse>;
 export function callLlm<T>(
   req: LlmObjectRequest<T>,
@@ -111,32 +161,60 @@ export async function callLlm<T>(
   req: LlmTextRequest | LlmObjectRequest<T>,
   opts: LlmOptions = {},
 ): Promise<LlmTextResponse | LlmObjectResponse<T>> {
+  const model = opts.model ?? getModel();
   const start = performance.now();
-  // Provider errors are deliberately not caught here. Callers decide what a
-  // rate limit or a malformed object means for their step.
-  const result = await generateText({
-    model: opts.model ?? getModel(),
-    instructions: req.instructions,
-    prompt: req.prompt,
-    output: req.schema ? Output.object({ schema: req.schema }) : undefined,
-  });
+  let res: LlmTextResponse | LlmObjectResponse<T>;
+  try {
+    const result = await generateText({
+      model,
+      instructions: req.instructions,
+      prompt: req.prompt,
+      output: req.schema ? Output.object({ schema: req.schema }) : undefined,
+    });
 
-  const response: LlmTextResponse = {
-    text: result.text,
-    finishReason: result.finishReason,
-    usage: {
-      inputTokens: result.usage.inputTokens ?? 0,
-      outputTokens: result.usage.outputTokens ?? 0,
-      reasoningTokens: result.usage.outputTokenDetails?.reasoningTokens ?? 0,
-    },
-    model: result.finalStep.response.modelId,
-    latencyMs: Math.round(performance.now() - start),
-  };
-  if (!req.schema) return response;
-  // generateText has already validated the JSON against the schema (a mismatch
-  // throws NoObjectGeneratedError); reading `output` throws
-  // NoOutputGeneratedError when the call did not finish with "stop". Both
-  // reach the caller unchanged, exactly as when agent.ts called the SDK
-  // directly. The cast is safe because `output` is typed from the schema.
-  return { ...response, output: result.output as T };
+    const response: LlmTextResponse = {
+      text: result.text,
+      finishReason: result.finishReason,
+      usage: {
+        inputTokens: result.usage.inputTokens ?? 0,
+        outputTokens: result.usage.outputTokens ?? 0,
+        reasoningTokens: result.usage.outputTokenDetails?.reasoningTokens ?? 0,
+      },
+      model: result.finalStep.response.modelId,
+      latencyMs: Math.round(performance.now() - start),
+    };
+    // generateText has already validated the JSON against the schema (a
+    // mismatch throws NoObjectGeneratedError); reading `output` throws
+    // NoOutputGeneratedError when the call did not finish with "stop". Both
+    // are read inside the try, so they are logged as failed calls. The cast
+    // is safe because `output` is typed from the schema.
+    res = req.schema ? { ...response, output: result.output as T } : response;
+  } catch (err) {
+    // Logged, then rethrown as the same object: callers decide what a rate
+    // limit or a malformed object means for their step.
+    const status = statusOf(err);
+    logLlmCall({
+      evt: "llm_call",
+      step: req.step,
+      ok: false,
+      model: typeof model === "string" ? model : model.modelId,
+      ms: Math.round(performance.now() - start),
+      error: err instanceof Error ? err.name : typeof err,
+      ...(status !== undefined && { status }),
+    });
+    throw err;
+  }
+  // Outside the try, so a call can never log both a success and a failure.
+  logLlmCall({
+    evt: "llm_call",
+    step: req.step,
+    ok: true,
+    model: res.model,
+    in: res.usage.inputTokens,
+    out: res.usage.outputTokens,
+    reasoning: res.usage.reasoningTokens,
+    finish: res.finishReason,
+    ms: res.latencyMs,
+  });
+  return res;
 }
