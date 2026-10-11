@@ -45,9 +45,10 @@ jobs:
 
       - run: npm ci
 
-      # Cheap, deterministic, and no API calls: if the SQL guard is broken
-      # there is no point spending quota on the agent.
-      - name: SQL guard tests
+      # Cheap, deterministic, and no API calls: if the SQL guard, callLlm or
+      # the eval's own metrics are broken there is no point spending quota on
+      # the agent.
+      - name: Unit tests
         run: npm test
 
       # Proves the answer key still executes before it is used to grade
@@ -86,3 +87,17 @@ jobs:
           # means an outage is possible and must not be mistaken for a
           # regression.
           EVAL_ALLOW_SKIPPED: "1"
+          # Recorded in eval-results.json. GITHUB_SHA would be the temporary
+          # merge commit, which matches nothing on the branch.
+          EVAL_COMMIT: ${{ github.event.pull_request.head.sha }}
+
+      # Per-case pass/fail, calls, tokens and latency for this PR's run, so the
+      # numbers can be compared against docs/baseline.md without re-running.
+      # always(): a failed gate is exactly when the details matter.
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results.json
+          if-no-files-found: ignore

@@ -139,8 +139,30 @@ export type LlmCallLog = {
     }
 );
 
+const listeners = new Set<(entry: LlmCallLog) => void>();
+
+/**
+ * Receives every `llm_call` entry right after it is logged; the eval runner
+ * uses this to attribute calls to questions. Returns an unsubscribe function.
+ * A listener that throws is ignored, so it can never turn a successful call
+ * into a failure or replace a provider error.
+ */
+export function onLlmCall(listener: (entry: LlmCallLog) => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 function logLlmCall(entry: LlmCallLog): void {
   console.log(JSON.stringify(entry));
+  for (const listener of listeners) {
+    try {
+      listener(entry);
+    } catch {
+      // See onLlmCall: observing a call must not change its outcome.
+    }
+  }
 }
 
 /**
