@@ -78,7 +78,11 @@
       "id": "electronics-products",
       "question": "List the products in the Electronics category",
       "tags": ["filter"],
-      "expected_sql": "SELECT name, price FROM products WHERE category = 'Electronics' ORDER BY name"
+      "_why": "\"List the products\" does not say which columns. Names alone is the reading SQL_SYSTEM_PROMPT pushes for (select only the columns asked about); names with prices is the original key. Both are accepted.",
+      "expected_sql": "SELECT name, price FROM products WHERE category = 'Electronics' ORDER BY name",
+      "accept_sql": [
+        "SELECT name FROM products WHERE category = 'Electronics' ORDER BY name"
+      ]
     },
     {
       "id": "cheapest-per-category",
@@ -121,7 +125,11 @@
       "id": "orders-per-country",
       "question": "How many orders came from each country?",
       "tags": ["join", "group-by"],
-      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country"
+      "_why": "Counting orders can fairly be read as counting sales, and the schema notes say to exclude cancelled orders from actual sales. Counting every order row is the original key. Both are accepted.",
+      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country",
+      "accept_sql": [
+        "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status <> 'cancelled' GROUP BY c.country ORDER BY order_count DESC, c.country"
+      ]
     },
     {
       "id": "german-customer-spend-by-category",
@@ -179,7 +187,11 @@
       "id": "top-countries-by-orders",
       "question": "What are the top 3 countries by number of orders?",
       "tags": ["join", "ranking"],
-      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country LIMIT 3"
+      "_why": "Same ambiguity as orders-per-country: with or without cancelled orders are both defensible readings of \"number of orders\". Both are accepted.",
+      "expected_sql": "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.country ORDER BY order_count DESC, c.country LIMIT 3",
+      "accept_sql": [
+        "SELECT c.country, count(*) AS order_count FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status <> 'cancelled' GROUP BY c.country ORDER BY order_count DESC, c.country LIMIT 3"
+      ]
     },
     {
       "id": "highest-avg-order-value-country",
@@ -192,7 +204,12 @@
       "id": "monthly-revenue-6m",
       "question": "Show monthly revenue for the last 6 months",
       "tags": ["join", "revenue", "time-series"],
-      "expected_sql": "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1 ORDER BY 1"
+      "_why": "\"The last 6 months\" has three common readings: the current month and the 5 before it (the original key), a rolling window from exactly 6 months ago (its first month is partial), and the 6 complete months before this one. All three are accepted.",
+      "expected_sql": "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '5 months' GROUP BY 1 ORDER BY 1",
+      "accept_sql": [
+        "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= now() - interval '6 months' GROUP BY 1 ORDER BY 1",
+        "SELECT to_char(date_trunc('month', o.created_at), 'YYYY-MM') AS month, round(sum(oi.quantity * oi.unit_price), 2) AS revenue FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.status <> 'cancelled' AND o.created_at >= date_trunc('month', now()) - interval '6 months' AND o.created_at < date_trunc('month', now()) GROUP BY 1 ORDER BY 1"
+      ]
     },
     {
       "id": "orders-last-month",
