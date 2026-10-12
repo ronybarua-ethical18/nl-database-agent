@@ -1,0 +1,205 @@
+# Baseline v2 eval: raw output for all 43 questions in evals/golden.json
+# Model: gemini-3.5-flash (default in src/lib/llm.ts). Commit 04a79cc. Run 2026-10-12, after `npm run seed`.
+# Three sessions, one free-tier key each, every question run once. Nothing was skipped or re-run.
+# Each session printed its own `llm_call` lines and summary; docs/baseline.md combines
+# them with summarize() from scripts/eval-metrics.ts. v1's raw output is docs/baseline-eval.log.
+
+==== chunk 1 | 2026-10-12T13:35Z | key A
+==== command: EVAL_THRESHOLD=0 EVAL_DELAY_MS=4000 npx tsx scripts/eval.ts --verbose --only <the 15 ids below>
+Running 15 question(s)
+
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":136,"reasoning":126,"finish":"stop","ms":2443}
+PASS  count-customers
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":563,"reasoning":553,"finish":"stop","ms":4742}
+PASS  count-products
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":336,"reasoning":325,"finish":"stop","ms":3576}
+PASS  count-orders
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":334,"reasoning":322,"finish":"stop","ms":4036}
+PASS  avg-product-price
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":269,"reasoning":255,"finish":"stop","ms":2791}
+PASS  count-countries
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":735,"out":294,"reasoning":277,"finish":"stop","ms":2744}
+PASS  count-cancelled-orders
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":291,"reasoning":259,"finish":"stop","ms":10107}
+PASS  customers-per-country
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":410,"reasoning":387,"finish":"stop","ms":3940}
+PASS  products-per-category
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":275,"reasoning":249,"finish":"stop","ms":3717}
+PASS  orders-by-status
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":343,"reasoning":327,"finish":"stop","ms":3933}
+PASS  most-expensive-product
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":212,"reasoning":192,"finish":"stop","ms":2413}
+PASS  cheapest-products
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":740,"out":456,"reasoning":431,"finish":"stop","ms":3574}
+PASS  products-over-100
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":463,"reasoning":438,"finish":"stop","ms":10452}
+PASS  electronics-products
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":664,"reasoning":636,"finish":"stop","ms":6962}
+PASS  cheapest-per-category
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":735,"out":421,"reasoning":375,"finish":"stop","ms":3334}
+PASS  total-revenue
+
+------------------------------------------------------------
+cases: 15   measured: 15   passed: 15   accuracy: 100.0%
+llm calls/question: 1.00 avg, 1 max   self-fix rate: 0.0%
+tokens/question: 737 in / 364 out (343 thinking)
+latency/question: p50 5.0s   p95 11.5s
+429s: 0   503s: 0   skipped: 0
+by step:
+  sql_generation  15 calls, 0 failed   737 in / 364 out (343 thinking)   p50 3.7s
+model: google / gemini-3.5-flash
+wrote eval-results.json
+
+==== chunk 2 | 2026-10-12T13:41Z | key B
+==== command: EVAL_THRESHOLD=0 EVAL_DELAY_MS=4000 npx tsx scripts/eval.ts --verbose --only <the 14 ids below>
+Running 14 question(s)
+
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":732,"out":531,"reasoning":445,"finish":"stop","ms":6015}
+PASS  revenue-by-category
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":655,"reasoning":569,"finish":"stop","ms":6800}
+PASS  revenue-by-country
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":491,"reasoning":449,"finish":"stop","ms":4584}
+PASS  total-items-sold
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":824,"reasoning":731,"finish":"stop","ms":7755}
+PASS  avg-order-value
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":1031,"reasoning":981,"finish":"stop","ms":23445}
+PASS  orders-per-country
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":741,"out":675,"reasoning":559,"finish":"stop","ms":4498}
+PASS  german-customer-spend-by-category
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":714,"reasoning":665,"finish":"stop","ms":11818}
+PASS  customers-without-orders
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":560,"reasoning":470,"finish":"stop","ms":4573}
+PASS  top-customers-by-revenue
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":744,"reasoning":609,"finish":"stop","ms":5628}
+PASS  top-products-last-month
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":739,"out":519,"reasoning":421,"finish":"stop","ms":3605}
+PASS  top-products-by-revenue
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":606,"reasoning":514,"finish":"stop","ms":5043}
+PASS  top-products-by-units
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":739,"out":714,"reasoning":619,"finish":"stop","ms":5685}
+PASS  best-selling-electronics
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":1587,"reasoning":1528,"finish":"stop","ms":25864}
+PASS  customer-most-orders
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":741,"out":572,"reasoning":504,"finish":"stop","ms":4283}
+PASS  top-countries-by-orders
+
+------------------------------------------------------------
+cases: 14   measured: 14   passed: 14   accuracy: 100.0%
+llm calls/question: 1.00 avg, 1 max   self-fix rate: 0.0%
+tokens/question: 738 in / 730 out (647 thinking)
+latency/question: p50 6.7s   p95 30.4s
+429s: 0   503s: 0   skipped: 0
+by step:
+  sql_generation  14 calls, 0 failed   738 in / 730 out (647 thinking)   p50 5.6s
+model: google / gemini-3.5-flash
+wrote eval-results.json
+
+==== chunk 3 | 2026-10-12T13:48Z | key C
+==== command: EVAL_THRESHOLD=0 EVAL_DELAY_MS=4000 npx tsx scripts/eval.ts --verbose --only <the 14 ids below>
+Running 14 question(s)
+
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":980,"reasoning":823,"finish":"stop","ms":5598}
+PASS  highest-avg-order-value-country
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":1604,"reasoning":1504,"finish":"stop","ms":9082}
+PASS  monthly-revenue-6m
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":737,"out":932,"reasoning":876,"finish":"stop","ms":33149}
+FAIL  orders-last-month
+      1 row(s) but different values or extra columns
+      Q: How many orders were placed last month?
+      agent: SELECT count(*) AS order_count
+FROM orders
+WHERE status != 'cancelled'
+  AND created_at >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+  AND created_at < date_trunc('month', CURRENT_DATE)
+      ref:   SELECT count(*) AS order_count FROM orders WHERE created_at >= date_trunc('month', now()) - interval '1 month' AND created_at < date_trunc('month', now())
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":740,"out":917,"reasoning":851,"finish":"stop","ms":5166}
+PASS  new-customers-per-month
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":622,"reasoning":528,"finish":"stop","ms":4831}
+PASS  best-revenue-month
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":753,"reasoning":689,"finish":"stop","ms":5152}
+PASS  revenue-this-year
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":741,"out":622,"reasoning":552,"finish":"stop","ms":4899}
+PASS  regression-paid-price-not-list-price
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":744,"out":309,"reasoning":263,"finish":"stop","ms":5278}
+PASS  regression-cancelled-excluded
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":735,"out":431,"reasoning":413,"finish":"stop","ms":5647}
+PASS  regression-no-extra-columns
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":109,"reasoning":95,"finish":"stop","ms":1969}
+PASS  refuse-drop-table
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":116,"reasoning":96,"finish":"stop","ms":1970}
+PASS  refuse-update-prices
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":738,"out":365,"reasoning":341,"finish":"stop","ms":3433}
+PASS  cannot-answer-profit-margin
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":740,"out":304,"reasoning":283,"finish":"stop","ms":4170}
+PASS  cannot-answer-delivery-time
+{"evt":"llm_call","step":"sql_generation","ok":true,"model":"gemini-3.5-flash","in":736,"out":411,"reasoning":395,"finish":"stop","ms":3884}
+PASS  cannot-answer-returns
+
+------------------------------------------------------------
+Failed:
+  orders-last-month — 1 row(s) but different values or extra columns
+
+cases: 14   measured: 14   passed: 13   accuracy: 92.9%
+llm calls/question: 1.00 avg, 1 max   self-fix rate: 0.0%
+tokens/question: 738 in / 605 out (551 thinking)
+latency/question: p50 6.0s   p95 37.8s
+429s: 0   503s: 0   skipped: 0
+by step:
+  sql_generation  14 calls, 0 failed   738 in / 605 out (551 thinking)   p50 4.9s
+model: google / gemini-3.5-flash
+wrote eval-results.json
+
+==== combined | all 43 cases from the three sessions' eval-results.json, through summarize() in scripts/eval-metrics.ts
+==== these are the figures docs/baseline.md reports
+cases: 43   measured: 43   passed: 42   accuracy: 97.7%
+llm calls/question: 1.00 avg, 1 max   self-fix rate: 0.0%
+tokens/question: 737 in / 562 out (510 thinking)
+latency/question: p50 6.0s   p95 27.9s
+429s: 0   503s: 0   skipped: 0
+by step:
+  sql_generation  43 calls, 0 failed   737 in / 562 out (510 thinking)   p50 4.7s
+
+==== per question, slowest first: id | chunk | result | end-to-end ms | model call ms
+orders-last-month | 3 | fail | 37781 | 33149
+customer-most-orders | 2 | pass | 30418 | 25864
+orders-per-country | 2 | pass | 27938 | 23445
+customers-without-orders | 2 | pass | 12893 | 11818
+electronics-products | 1 | pass | 11508 | 10452
+customers-per-country | 1 | pass | 11165 | 10107
+revenue-by-category | 2 | pass | 10584 | 6015
+highest-avg-order-value-country | 3 | pass | 10394 | 5598
+monthly-revenue-6m | 3 | pass | 10254 | 9082
+avg-order-value | 2 | pass | 8861 | 7755
+revenue-by-country | 2 | pass | 8410 | 6800
+cheapest-per-category | 1 | pass | 8017 | 6962
+count-customers | 1 | pass | 7506 | 2443
+regression-no-extra-columns | 3 | pass | 6768 | 5647
+best-selling-electronics | 2 | pass | 6756 | 5685
+top-products-last-month | 2 | pass | 6703 | 5628
+regression-cancelled-excluded | 3 | pass | 6401 | 5278
+new-customers-per-month | 3 | pass | 6292 | 5166
+revenue-this-year | 3 | pass | 6275 | 5152
+top-products-by-units | 2 | pass | 6117 | 5043
+regression-paid-price-not-list-price | 3 | pass | 6025 | 4899
+best-revenue-month | 3 | pass | 5958 | 4831
+top-customers-by-revenue | 2 | pass | 5952 | 4573
+count-products | 1 | pass | 5800 | 4742
+total-items-sold | 2 | pass | 5683 | 4584
+german-customer-spend-by-category | 2 | pass | 5569 | 4498
+top-countries-by-orders | 2 | pass | 5387 | 4283
+avg-product-price | 1 | pass | 5097 | 4036
+products-per-category | 1 | pass | 4995 | 3940
+most-expensive-product | 1 | pass | 4991 | 3933
+orders-by-status | 1 | pass | 4775 | 3717
+top-products-by-revenue | 2 | pass | 4680 | 3605
+count-orders | 1 | pass | 4636 | 3576
+products-over-100 | 1 | pass | 4631 | 3574
+total-revenue | 1 | pass | 4392 | 3334
+cannot-answer-delivery-time | 3 | pass | 4170 | 4170
+cannot-answer-returns | 3 | pass | 3885 | 3884
+count-countries | 1 | pass | 3848 | 2791
+count-cancelled-orders | 1 | pass | 3815 | 2744
+cheapest-products | 1 | pass | 3471 | 2413
+cannot-answer-profit-margin | 3 | pass | 3433 | 3433
+refuse-update-prices | 3 | pass | 1970 | 1970
+refuse-drop-table | 3 | pass | 1969 | 1969
