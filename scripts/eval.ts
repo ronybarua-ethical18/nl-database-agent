@@ -4,11 +4,8 @@
  * Sends every question in evals/golden.json through the agent and grades the
  * answer, then prints a scorecard.
  *
- * Grading is result-based, not text-based. Two very different queries can both
- * be correct, so comparing SQL strings would fail correct answers constantly.
- * Instead the agent's rows are compared against the rows the reference query
- * returns. Postgres decides who is right, deterministically and for free — no
- * LLM judge, and so no judge's blind spots baked into the score.
+ * Grading is result-based, not text-based: the agent's rows are compared
+ * against the rows each accepted reference query returns (see grade.ts).
  *
  * Usage:
  *   npm run eval                            # everything
@@ -49,12 +46,18 @@ import { config } from "dotenv";
 // Next.js loads `.env.local`, but plain `dotenv/config` reads only `.env`.
 config({ path: [".env.local", ".env"], quiet: true });
 
+// postgres.js parses `timestamp` (no zone) values as local time. In UTC, a
+// month written as date_trunc(...) is midnight on the 1st wherever this runs,
+// which the grader relies on to treat it as the same month as 'YYYY-MM' text.
+process.env.TZ = "UTC";
+
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import postgres from "postgres";
 import { askDatabase, type AgentResult } from "../src/lib/agent";
 import { describeModel, onLlmCall, type LlmCallLog } from "../src/lib/llm";
 import { formatSummary, parseThreshold, summarize, type CaseResult } from "./eval-metrics";
+import { grade, type Rows } from "./grade";
 import { isDbTransient, isDbTransientMessage, isProviderOutage } from "./transient";
 
 type Question = {
@@ -62,6 +65,11 @@ type Question = {
   question: string;
   tags?: string[];
   expected_sql?: string;
+  /**
+   * Further reference queries for a question with more than one defensible
+   * reading. Matching any of them, or expected_sql, passes.
+   */
+  accept_sql?: string[];
   expect?: "refuse" | "cannot_answer";
 };
 
@@ -80,109 +88,6 @@ const RATE_LIMIT_BACKOFF_MS = Number(process.env.EVAL_BACKOFF_MS ?? "65000");
  * locally you want the opposite, because an incomplete run is worth noticing.
  */
 const ALLOW_SKIPPED = process.env.EVAL_ALLOW_SKIPPED === "1";
-
-// --- comparing result sets ------------------------------------------------
-
-/**
- * Collapse a cell to a comparable string.
- *
- * Postgres returns numerics as strings and `sum()` widens the scale, so the
- * same amount can arrive as "483242.26" or "483242.2600". Numbers are compared
- * at fixed precision to absorb that, and timestamps as ISO strings.
- */
-function normalizeCell(value: unknown): string {
-  if (value === null || value === undefined) return "\u0000null";
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "boolean") return String(value);
-
-  const text = String(value).trim();
-  if (text !== "" && !Number.isNaN(Number(text))) {
-    // 2dp, because every monetary column in this schema is numeric(10,2) and
-    // counts are integers, so no correct answer depends on finer precision.
-    // It matters: asked for the average product price, the reference rounds to
-    // 315.09 while the agent returns 315.0925. Both are right, and a stricter
-    // comparison marks the agent wrong for the sin of not rounding.
-    return Number(Number(text).toFixed(2)).toString();
-  }
-  return text;
-}
-
-/**
- * A row becomes a sorted tuple of its values, ignoring column names entirely.
- *
- * The agent is free to alias `revenue` as `total_sales`, and a correct answer
- * should not fail over that. Sorting the values also makes column ORDER
- * irrelevant. The tradeoff is accepted deliberately: two numeric columns
- * swapped between each other would still compare equal. That is rare, and far
- * less costly than failing every answer that picked different aliases.
- */
-function rowKey(row: Record<string, unknown>): string {
-  return Object.values(row).map(normalizeCell).sort().join("\u001f");
-}
-
-/** Order-insensitive multiset comparison. */
-function sameRows(
-  actual: Record<string, unknown>[],
-  expected: Record<string, unknown>[],
-): boolean {
-  if (actual.length !== expected.length) return false;
-  const a = actual.map(rowKey).sort();
-  const b = expected.map(rowKey).sort();
-  return a.every((key, i) => key === b[i]);
-}
-
-// --- grading one question -------------------------------------------------
-
-function grade(
-  q: Question,
-  result: AgentResult,
-  expectedRows: Record<string, unknown>[] | null,
-): {
-  pass: boolean;
-  /** Fixed text and counts only: it is written to eval-results.json. */
-  reason?: string;
-  /**
-   * The agent's own message, which can quote the model or a database error.
-   * Printed to the console, never written to the results file.
-   */
-  detail?: string;
-} {
-  // Questions the agent is supposed to decline.
-  if (q.expect) {
-    if (result.ok) {
-      return { pass: false, reason: `expected ${q.expect}, but the agent answered` };
-    }
-    if (result.refusal !== q.expect) {
-      return {
-        pass: false,
-        reason: `expected ${q.expect}, got ${result.refusal ?? "a failure"}`,
-        detail: result.message,
-      };
-    }
-    return { pass: true };
-  }
-
-  if (!result.ok) {
-    return result.refusal
-      ? { pass: false, reason: `agent declined (${result.refusal}) but the question is answerable` }
-      : { pass: false, reason: "agent produced no answer", detail: result.message };
-  }
-
-  const actual = result.rows ?? [];
-  const expected = expectedRows ?? [];
-  if (sameRows(actual, expected)) return { pass: true };
-
-  if (actual.length !== expected.length) {
-    return {
-      pass: false,
-      reason: `expected ${expected.length} row(s), agent returned ${actual.length}`,
-    };
-  }
-  return {
-    pass: false,
-    reason: `${expected.length} row(s) but different values or extra columns`,
-  };
-}
 
 // --- runner ---------------------------------------------------------------
 
@@ -221,7 +126,25 @@ async function askOnce(question: string): Promise<AgentResult | { transient: str
   return result;
 }
 
-type Rows = Record<string, unknown>[];
+/**
+ * Runs every accepted reference query for a question: `expected_sql`, then
+ * any `accept_sql` alternatives. The first that fails decides the outcome,
+ * because a key with one broken answer is a broken key.
+ */
+async function runAnswerKey(
+  sql: postgres.Sql,
+  queries: string[],
+): Promise<{ answers: Rows[] } | { broken: string } | { unavailable: string }> {
+  const answers: Rows[] = [];
+  for (const [i, query] of queries.entries()) {
+    const ref = await runReference(sql, query);
+    // Name the query that broke: with alternatives, "the key" is not one query.
+    if ("broken" in ref) return { broken: `${i === 0 ? "expected_sql" : `accept_sql[${i - 1}]`}: ${ref.broken}` };
+    if ("unavailable" in ref) return ref;
+    answers.push(ref.rows);
+  }
+  return { answers };
+}
 
 /**
  * Runs a reference query. A real SQL error is a broken answer key; a
@@ -341,11 +264,11 @@ async function main(): Promise<void> {
     for (const q of questions) {
       const tagsOf = q.tags ?? [];
 
-      // The reference query defines the correct answer, so a failure here is a
-      // broken answer key, not a wrong agent. Say which it is.
-      let expectedRows: Rows | null = null;
+      // The reference queries define the correct answers, so a failure here is
+      // a broken answer key, not a wrong agent. Say which it is.
+      let answers: Rows[] | null = null;
       if (q.expected_sql) {
-        const ref = await runReference(sql, q.expected_sql);
+        const ref = await runAnswerKey(sql, [q.expected_sql, ...(q.accept_sql ?? [])]);
         if ("unavailable" in ref) {
           console.log(`SKIP  ${q.id} — database unavailable, not measured`);
           cases.push({
@@ -373,7 +296,7 @@ async function main(): Promise<void> {
           });
           continue;
         }
-        expectedRows = ref.rows;
+        answers = ref.answers;
       }
 
       // Calls from tries that are thrown away still cost quota; they are kept
@@ -409,7 +332,7 @@ async function main(): Promise<void> {
       }
       const result = run.outcome;
 
-      const { pass, reason, detail } = grade(q, result, expectedRows);
+      const { pass, reason, detail } = grade(q, result, answers);
 
       cases.push({
         id: q.id,
