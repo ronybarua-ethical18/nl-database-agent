@@ -6,7 +6,7 @@ Ask a Postgres database questions in plain English — the agent writes the SQL,
 <!-- ?event=pull_request because the gate runs on PRs only — a push trigger
      would spend the free-tier quota twice for the same commit. -->
 
-> **Live demo:** [nl-database-agent.vercel.app](https://nl-database-agent.vercel.app) — pre-seeded, no signup · **Eval accuracy:** _not yet measured — see [Evals](#evals)_
+> **Live demo:** [nl-database-agent.vercel.app](https://nl-database-agent.vercel.app) — pre-seeded, no signup · **Eval accuracy:** 42/43 (97.7%) on `gemini-3.5-flash` — see [Evals](#evals)
 
 <!--
   MEDIA — drop two files into docs/media/ and uncomment the lines below:
@@ -77,9 +77,10 @@ scripts/
   seed.ts                  # seeds the demo shop data (faker, deterministic seed)
   check-safety.ts          # asserts the read-only role really is read-only
   eval.ts                  # eval runner → accuracy scorecard
+  grade.ts                 # compares the agent's rows with every accepted answer
   verify-golden.ts         # executes the answer key so it can be audited
 evals/
-  golden.json              # golden dataset: 43 questions + reference SQL
+  golden.json              # golden dataset: 43 questions + reference SQL (+ accepted alternatives)
 .github/workflows/
   eval.yml                 # CI gate: the 9-question subset on every PR
 ```
@@ -125,9 +126,11 @@ npm run eval -- --only top- --verbose     # iterate on a few, show the SQL
 npm run verify:golden                     # execute the answer key, print what it returns
 ```
 
-`npm run verify:golden` exists because a wrong reference query silently becomes the definition of "correct", and every score built on it would be meaningless. It executes all 38 reference queries and prints their rows so the key can be audited rather than trusted.
+A question with more than one defensible reading — "the last 6 months", or whether "number of orders" counts cancelled ones — lists the alternatives under `accept_sql`, each with a `_why`, and matching any of them passes. The grader also treats a month the same whether it comes back as a `date_trunc` timestamp or as `'YYYY-MM'` text. A model should not fail for choosing a valid reading or a different spelling of the same month.
 
-**Accuracy is not yet published.** The full suite costs 45–130 model calls and Gemini's free tier runs dry after roughly 20 questions a day, so no complete run has been recorded. The runner reports questions it could not measure as SKIPPED and excludes them from the denominator rather than scoring them as wrong — a partial run must not be mistaken for a good one.
+`npm run verify:golden` exists because a wrong reference query silently becomes the definition of "correct", and every score built on it would be meaningless. It executes all 38 reference queries and their 5 alternatives and prints their rows so the key can be audited rather than trusted.
+
+**Accuracy: 42/43 (97.7%)** on `gemini-3.5-flash`, every question measured once, on 2026-10-12. The one miss, `orders-last-month`, is a cancelled-orders ambiguity in the answer key rather than a wrong number. The numbers behind it — calls, tokens, latency and cost per question — and the earlier 37/43 run are in [`docs/baseline.md`](docs/baseline.md). Gemini's free tier runs dry after roughly 20 questions a day, so a full run takes three free-tier keys or a paid one; that run used `--only` in three sessions. The runner reports questions it could not measure as SKIPPED and excludes them from the denominator rather than scoring them as wrong — a partial run must not be mistaken for a good one.
 
 ## CI gate
 
